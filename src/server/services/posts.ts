@@ -174,6 +174,8 @@ export async function listFeed(db: Db, viewer: Viewer, opts: { before?: Date | n
   const conds = [visiblePost(viewer.id)];
   if (opts.before && !Number.isNaN(opts.before.getTime())) conds.push(lt(posts.createdAt, opts.before));
   if (opts.authorId) conds.push(eq(posts.authorId, opts.authorId));
+  // ホームのフィードからは、ミュートした人の投稿を外す（プロフィールを開けば見える）
+  else conds.push(sql`NOT EXISTS (SELECT 1 FROM user_mutes um WHERE um.muter_id = ${viewer.id} AND um.muted_id = ${posts.authorId})`);
   const rows = await db
     .select()
     .from(posts)

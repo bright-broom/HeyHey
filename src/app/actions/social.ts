@@ -4,6 +4,7 @@ import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/server/db/client";
 import { AppError } from "@/server/lib/errors";
+import { blockUser, muteUser, unblockUser, unmuteUser } from "@/server/services/blocks";
 import { removeFriend, requestFriend, respondFriend } from "@/server/services/friends";
 import { createInvitation, revokeInvitation } from "@/server/services/invites";
 import { updateProfile, withdraw } from "@/server/services/members";
@@ -37,6 +38,26 @@ export async function friendAction(fd: FormData) {
     else if (op === "decline") await respondFriend(db, viewer!, other, false);
     else if (op === "remove") await removeFriend(db, viewer!, other);
   });
+}
+
+/** ブロック・ミュートとその解除 */
+export async function relationAction(fd: FormData) {
+  const { db, viewer } = await ctx();
+  const other = str(fd, "userId");
+  const op = str(fd, "op");
+  const messages: Record<string, string> = {
+    block: "ブロックしました。お互いの投稿やプロフィールが見えなくなります。",
+    unblock: "ブロックを解除しました。",
+    mute: "ミュートしました。ホームにこの人の投稿が出なくなります。",
+    unmute: "ミュートを解除しました。",
+  };
+  await quiet(async () => {
+    if (op === "block") await blockUser(db, viewer!, other);
+    else if (op === "unblock") await unblockUser(db, viewer!, other);
+    else if (op === "mute") await muteUser(db, viewer!, other);
+    else if (op === "unmute") await unmuteUser(db, viewer!, other);
+    else throw new AppError("invalid", "操作を選んでください。");
+  }, messages[op]);
 }
 
 export async function createInviteAction(_: FormState, fd: FormData): Promise<FormState> {

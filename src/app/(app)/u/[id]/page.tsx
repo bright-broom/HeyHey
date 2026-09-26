@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { friendAction } from "@/app/actions/social";
+import { friendAction, relationAction } from "@/app/actions/social";
 import { Avatar } from "@/components/Avatar";
 import { PostCard } from "@/components/PostCard";
 import { ReportForm } from "@/components/ReportForm";
@@ -43,6 +43,16 @@ function FriendButton({ userId, rel }: { userId: string; rel: string }) {
   }
 }
 
+function RelationButton({ userId, op, label, className = "btn-link text-xs" }: { userId: string; op: string; label: string; className?: string }) {
+  return (
+    <form action={relationAction}>
+      <input type="hidden" name="userId" value={userId} />
+      <input type="hidden" name="op" value={op} />
+      <button className={className}>{label}</button>
+    </form>
+  );
+}
+
 export default async function ProfilePage(props: PageProps<"/u/[id]">) {
   const viewer = await requireMember();
   const { id } = await props.params;
@@ -67,15 +77,35 @@ export default async function ProfilePage(props: PageProps<"/u/[id]">) {
         <div className="mt-8">
           {profile.relationship === "self" ? (
             <Link href="/settings" className="btn-ghost">プロフィールを編集</Link>
+          ) : profile.blocking ? (
+            <div className="space-y-3 border-l-2 border-ink py-1 pl-3">
+              <p className="text-sm">ブロック中です。お互いの投稿が見えません。</p>
+              <RelationButton userId={profile.id} op="unblock" label="ブロックを解除する" className="btn-ghost" />
+            </div>
           ) : (
             <FriendButton userId={profile.id} rel={profile.relationship} />
           )}
         </div>
-        {profile.relationship !== "self" && (
+        {profile.relationship !== "self" && !profile.blocking && (
           <details className="mt-8 text-xs text-muted">
-            <summary className="cursor-pointer list-none tracking-[0.08em] hover:text-ink">このメンバーを通報</summary>
-            <div className="mt-3 border border-line bg-light p-4">
-              <ReportForm targetType="user" targetId={profile.id} />
+            <summary className="cursor-pointer list-none tracking-[0.08em] hover:text-ink">ミュート・ブロック・通報</summary>
+            <div className="mt-3 space-y-5 border border-line bg-light p-4">
+              <div className="space-y-1.5">
+                {profile.muting ? (
+                  <RelationButton userId={profile.id} op="unmute" label="ミュートを解除する" />
+                ) : (
+                  <RelationButton userId={profile.id} op="mute" label="ミュートする" />
+                )}
+                <p className="leading-relaxed">ホームにこの人の投稿を出さず、通知も止めます。相手には伝わりません。</p>
+              </div>
+              <div className="space-y-1.5 border-t border-line pt-4">
+                <RelationButton userId={profile.id} op="block" label="ブロックする" className="btn-link text-xs text-danger" />
+                <p className="leading-relaxed">お互いの投稿・コメント・プロフィールが見えなくなり、友達も解除されます。相手には伝わりません。</p>
+              </div>
+              <div className="border-t border-line pt-4">
+                <p className="mb-2 tracking-[0.08em]">このメンバーを通報</p>
+                <ReportForm targetType="user" targetId={profile.id} />
+              </div>
             </div>
           </details>
         )}

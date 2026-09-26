@@ -307,6 +307,39 @@ export const friendships = pgTable(
 
 // ───────── 通知・通報・監査 ─────────
 
+/**
+ * ブロック（双方向に見えなくなる）。blocker が blocked をブロックした。
+ * 公開範囲の判定（lib/visibility）がこの表を見て、お互いの投稿・コメント・プロフィールを隠す。
+ */
+export const userBlocks = pgTable(
+  "user_blocks",
+  {
+    blockerId: uuid("blocker_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    blockedId: uuid("blocked_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.blockerId, t.blockedId] }), index("user_blocks_blocked_idx").on(t.blockedId), check("user_blocks_not_self", sql`${t.blockerId} <> ${t.blockedId}`)],
+);
+
+/** ミュート（一方向・相手には伝わらない）。muter のホームのフィードと通知から muted を外す */
+export const userMutes = pgTable(
+  "user_mutes",
+  {
+    muterId: uuid("muter_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    mutedId: uuid("muted_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.muterId, t.mutedId] }), check("user_mutes_not_self", sql`${t.muterId} <> ${t.mutedId}`)],
+);
+
 export const notifications = pgTable(
   "notifications",
   {

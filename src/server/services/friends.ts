@@ -5,6 +5,7 @@ import { friendships, profiles, users } from "../db/schema";
 import { AppError, conflict, invalid, notFound } from "../lib/errors";
 import { assertMember } from "../lib/policy";
 import type { Viewer } from "../lib/viewer";
+import { isBlockedBetween } from "./blocks";
 import { notify } from "./notifications";
 import { consume } from "./ratelimit";
 
@@ -24,10 +25,11 @@ export async function relationship(db: Db, viewer: Viewer, otherId: string): Pro
   return f.requesterId === viewer.id ? "outgoing" : "incoming";
 }
 
-async function activeMember(db: Db, id: string) {
+async function activeMember(db: Db, id: string, viewerId: string) {
   if (!z.uuid().safeParse(id).success) throw notFound();
   const [u] = await db.select({ id: users.id }).from(users).where(and(eq(users.id, id), eq(users.status, "active")));
-  if (!u) throw notFound("会員が見つかりません。");
+  // ブロックし合っている相手とは友達になれない（ブロックの有無は明かさず「見つからない」）
+  if (!u || (await isBlockedBetween(db, viewerId, id))) throw notFound("会員が見つかりません。");
   return u;
 }
 
@@ -35,7 +37,7 @@ async function activeMember(db: Db, id: string) {
 export async function requestFriend(db: Db, viewer: Viewer, otherId: string) {
   assertMember(viewer);
   if (otherId === viewer.id) throw invalid("自分には友達申請できません。");
-  await activeMember(db, otherId);
+  await activeMember(db, otherId, viewer.id);
   const rel = await relationship(db, viewer, otherId);
   if (rel === "friends" || rel === "outgoing") return;
   if (rel === "incoming") return respondFriend(db, viewer, otherId, true);
@@ -61,7 +63,7 @@ export async function respondFriend(db: Db, viewer: Viewer, requesterId: string,
     return;
   }
   // 申請者が停止・退会している場合は承認できない（復帰時に友達関係が勝手に復活しないように）
-  await activeMember(db, requesterId);
+  await activeMember(db, requesterId, viewer.id);
   await db.transaction(async (tx) => {
     const [f] = await tx.update(friendships).set({ status: "accepted", respondedAt: new Date() }).where(where).returning();
     if (!f) throw conflict("友達申請が見つかりません。");

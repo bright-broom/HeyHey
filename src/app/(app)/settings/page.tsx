@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { PageTitle } from "@/components/PageTitle";
 import { getDb } from "@/server/db/client";
+import { relationAction } from "@/app/actions/social";
+import { Avatar } from "@/components/Avatar";
+import { listBlocksAndMutes } from "@/server/services/blocks";
 import { getProfile } from "@/server/services/members";
 import { requireMember } from "@/server/web/session";
 import { PasswordForm, ProfileForm, WithdrawForm } from "./Forms";
@@ -9,7 +12,8 @@ export const metadata = { title: "設定" };
 
 export default async function SettingsPage() {
   const viewer = await requireMember();
-  const me = (await getProfile(await getDb(), viewer, viewer.id))!;
+  const db = await getDb();
+  const [me, relations] = await Promise.all([getProfile(db, viewer, viewer.id).then((p) => p!), listBlocksAndMutes(db, viewer)]);
   return (
     <div className="max-w-3xl space-y-10">
       <PageTitle plaque="SETTINGS" title="設定" />
@@ -29,6 +33,29 @@ export default async function SettingsPage() {
       <section className="card space-y-6 p-6 sm:p-8">
         <h2 className="h2">パスワード</h2>
         <PasswordForm />
+      </section>
+      <section className="card space-y-6 p-6 sm:p-8">
+        <h2 className="h2">ブロック・ミュート中の人</h2>
+        {relations.blocked.length === 0 && relations.muted.length === 0 ? (
+          <p className="text-sm text-muted">いません。メンバーのプロフィールから設定できます。</p>
+        ) : (
+          <ul className="divide-y divide-line border-y border-line">
+            {[...relations.blocked.map((p) => ({ ...p, op: "unblock", label: "ブロック中", action: "解除" })), ...relations.muted.map((p) => ({ ...p, op: "unmute", label: "ミュート中", action: "解除" }))].map((p) => (
+              <li key={`${p.op}-${p.id}`} className="flex items-center gap-3 py-3">
+                <Avatar name={p.displayName} mediaId={p.avatarMediaId} size={28} />
+                <span className="min-w-0 flex-1 truncate text-sm">
+                  {p.displayName}
+                  <span className="ml-2 text-xs text-muted">{p.label}</span>
+                </span>
+                <form action={relationAction}>
+                  <input type="hidden" name="userId" value={p.id} />
+                  <input type="hidden" name="op" value={p.op} />
+                  <button className="btn-ghost px-3 py-1.5 text-xs" aria-label={`${p.displayName}の${p.label}を解除`}>{p.action}</button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
       <section className="card flex flex-wrap items-center justify-between gap-4 p-6 sm:p-8">
         <div className="max-w-md">

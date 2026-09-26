@@ -17,6 +17,18 @@ export function areFriends(a: SQL | string, b: SQL | string): SQL {
   )`;
 }
 
+/**
+ * a と b のどちらかがもう一方をブロックしているか。ブロックは双方向に効く
+ * （ブロックした側もされた側も、相手の投稿・コメントが見えない）。
+ */
+export function blockedBetween(a: SQL | string, b: SQL | string): SQL {
+  return sql`EXISTS (
+    SELECT 1 FROM user_blocks ub
+    WHERE (ub.blocker_id = ${a} AND ub.blocked_id = ${b})
+       OR (ub.blocker_id = ${b} AND ub.blocked_id = ${a})
+  )`;
+}
+
 /** 投稿者が「表示してよい状態」か。停止中の会員の投稿は隠し、退会（匿名化）済みは残す */
 function authorIsShowable(authorIdCol: SQL | typeof posts.authorId | typeof comments.authorId): SQL {
   return sql`EXISTS (SELECT 1 FROM users au WHERE au.id = ${authorIdCol} AND au.status IN ('active', 'withdrawn'))`;
@@ -31,6 +43,7 @@ export function visiblePost(viewerId: string): SQL {
       and(
         isNull(posts.hiddenAt),
         authorIsShowable(posts.authorId),
+        sql`NOT ${blockedBetween(viewerId, sql`${posts.authorId}`)}`,
         or(
           eq(posts.visibility, "members"),
           and(eq(posts.visibility, "friends"), areFriends(viewerId, sql`${posts.authorId}`)),
@@ -45,6 +58,9 @@ export function visibleComment(viewerId: string): SQL {
   return and(
     isNull(comments.deletedAt),
     sql`EXISTS (SELECT 1 FROM posts WHERE posts.id = ${comments.postId} AND ${visiblePost(viewerId)})`,
-    or(eq(comments.authorId, viewerId), and(isNull(comments.hiddenAt), authorIsShowable(comments.authorId))),
+    or(
+      eq(comments.authorId, viewerId),
+      and(isNull(comments.hiddenAt), authorIsShowable(comments.authorId), sql`NOT ${blockedBetween(viewerId, sql`${comments.authorId}`)}`),
+    ),
   )!;
 }

@@ -8,6 +8,8 @@ import { assertMember } from "../lib/policy";
 import type { Viewer } from "../lib/viewer";
 import { audit } from "./audit";
 import { processImage, removeStoredFile } from "./media";
+import { blockedBetween } from "../lib/visibility";
+import { blockState, isBlockedBy } from "./blocks";
 import { relationship } from "./friends";
 
 /** 会員のプロフィール。承認済み会員（と本人）のものだけ返す */
@@ -29,6 +31,8 @@ export async function getProfile(db: Db, viewer: Viewer, userId: string) {
     .leftJoin(profiles, eq(profiles.userId, users.id))
     .where(eq(users.id, userId));
   if (!row || (row.status !== "active" && row.id !== viewer.id)) return null;
+  // 相手にブロックされていれば、存在しないのと同じに見せる
+  if (row.id !== viewer.id && (await isBlockedBy(db, viewer.id, row.id))) return null;
   const [{ n: friendCount } = { n: 0 }] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(friendships)
@@ -39,6 +43,7 @@ export async function getProfile(db: Db, viewer: Viewer, userId: string) {
     affiliation: row.affiliation ?? "",
     friendCount,
     relationship: await relationship(db, viewer, userId),
+    ...(row.id === viewer.id ? { blocking: false, muting: false } : await blockState(db, viewer, userId)),
   };
 }
 
@@ -96,7 +101,8 @@ export async function updateProfile(
 export async function searchMembers(db: Db, viewer: Viewer, qRaw = "") {
   assertMember(viewer);
   const q = qRaw.trim().slice(0, 50);
-  const conds = [eq(users.status, "active")];
+  // ブロックし合っている人は名簿にも出さない（ブロックした人は設定画面から解除できる）
+  const conds = [eq(users.status, "active"), sql`NOT ${blockedBetween(viewer.id, sql`${users.id}`)}`];
   if (q) {
     const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
     conds.push(or(ilike(users.displayName, like), ilike(profiles.affiliation, like))!);
