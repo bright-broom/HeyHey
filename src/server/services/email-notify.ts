@@ -53,7 +53,7 @@ export function unsubscribeToken(userId: string, kind: EmailKind): string {
 
 export function parseUnsubscribeToken(token: string): { userId: string; kind: EmailKind } | null {
   const [userId, kind, sig] = token.split(".");
-  if (!userId || !sig || (kind !== "instant" && kind !== "digest") || !/^[0-9a-f-]{36}$/.test(userId)) return null;
+  if (!userId || !sig || (kind !== "instant" && kind !== "digest") || !/^[0-9a-f-]{36}$/.test(userId) || !/^[0-9a-f]{32}$/.test(sig)) return null;
   const expected = sign(userId, kind);
   if (sig.length !== expected.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
   return { userId, kind };
@@ -119,6 +119,7 @@ export async function dispatchNotificationEmail(db: Db, userId: string, now = ne
   if (!pending.length) return false;
 
   // 送信枠を原子的に確保する（同時に何件お知らせが来ても、送るのは 1 通）
+  const [prev] = await db.select({ lastEmailAt: notificationPrefs.lastEmailAt }).from(notificationPrefs).where(eq(notificationPrefs.userId, userId));
   const since = new Date(now.getTime() - THROTTLE_MIN * 60_000);
   const [claimed] = await db
     .insert(notificationPrefs)
@@ -131,14 +132,21 @@ export async function dispatchNotificationEmail(db: Db, userId: string, now = ne
     .returning({ userId: notificationPrefs.userId });
   if (!claimed) return false;
 
-  await db.update(notifications).set({ emailedAt: now }).where(inArray(notifications.id, pending.map((p) => p.id)));
   const f = footer(userId, "instant");
-  await sendMail(db, {
-    to: u.email,
-    subject: `【Kakomi】新しいお知らせが ${pending.length} 件あります`,
-    body: [`Kakomi に新しいお知らせが ${pending.length} 件あります（メンション・コメント・返信・友達申請）。`, "", appUrl("/notifications"), f.text].join("\n"),
-    headers: f.headers,
-  });
+  try {
+    await sendMail(db, {
+      to: u.email,
+      subject: `【Kakomi】新しいお知らせが ${pending.length} 件あります`,
+      body: [`Kakomi に新しいお知らせが ${pending.length} 件あります（メンション・コメント・返信・友達申請）。`, "", appUrl("/notifications"), f.text].join("\n"),
+      headers: f.headers,
+    });
+  } catch (e) {
+    // 送れなかったら送信枠を戻し、印も付けない（次の機会に送り直す）
+    await db.update(notificationPrefs).set({ lastEmailAt: prev?.lastEmailAt ?? null }).where(eq(notificationPrefs.userId, userId));
+    console.error("[notification-email] send failed", e instanceof Error ? e.message : e);
+    return false;
+  }
+  await db.update(notifications).set({ emailedAt: now }).where(inArray(notifications.id, pending.map((p) => p.id)));
   return true;
 }
 
@@ -162,8 +170,16 @@ export async function scheduleNotificationEmail(userId: string): Promise<void> {
   }
 }
 
+/** 送信サービスの上限（1 秒あたりの通数）に当たらないよう、実際に送るときだけ間を空ける */
+const pace = () => (process.env.RESEND_API_KEY ? new Promise((r) => setTimeout(r, 600)) : Promise.resolve());
+
+/** 定期処理の中でメールに使える時間。超えたら残りは次の回に回す（関数の実行時間の上限を守る） */
+export type Budget = { until: number };
+export const budget = (ms: number): Budget => ({ until: Date.now() + ms });
+const outOfTime = (b?: Budget) => !!b && Date.now() > b.until;
+
 /** 毎日の定期処理：送り残したお知らせを送る */
-export async function dispatchPendingNotificationEmails(db: Db, now = new Date()): Promise<number> {
+export async function dispatchPendingNotificationEmails(db: Db, now = new Date(), b?: Budget): Promise<number> {
   const rows = await db
     .selectDistinct({ userId: notifications.userId })
     .from(notifications)
@@ -176,23 +192,32 @@ export async function dispatchPendingNotificationEmails(db: Db, now = new Date()
       ),
     );
   let sent = 0;
-  for (const r of rows) if (await dispatchNotificationEmail(db, r.userId, now)) sent++;
+  for (const r of rows) {
+    if (outOfTime(b)) break;
+    if (await dispatchNotificationEmail(db, r.userId, now)) {
+      sent++;
+      await pace();
+    }
+  }
   return sent;
 }
 
 // ───────── 週 1 回のまとめ ─────────
 
-/** 日本時間の月曜日か */
+/**
+ * 週 1 回のまとめを送る日か（日本時間の月曜。月曜に送り切れなかった分を水曜まで拾う。
+ * 同じ人に 6 日以内に 2 通は送らないので、火・水に 2 通目が届くことはない）
+ */
 export function isDigestDay(now: Date): boolean {
-  return new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", weekday: "short" }).format(now) === "Mon";
+  return ["Mon", "Tue", "Wed"].includes(new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", weekday: "short" }).format(now));
 }
 
 /** 週 1 回のまとめを送る。新しい投稿も未読もなければ送らない。送った人数を返す */
-export async function sendWeeklyDigests(db: Db, now = new Date()): Promise<number> {
+export async function sendWeeklyDigests(db: Db, now = new Date(), b?: Budget): Promise<number> {
   const weekAgo = new Date(now.getTime() - 7 * 24 * 3600_000);
   const due = new Date(now.getTime() - DIGEST_INTERVAL_DAYS * 24 * 3600_000);
   const members = await db
-    .select({ id: users.id, email: users.email })
+    .select({ id: users.id, email: users.email, lastDigestAt: notificationPrefs.lastDigestAt })
     .from(users)
     .leftJoin(notificationPrefs, eq(notificationPrefs.userId, users.id))
     .where(
@@ -204,6 +229,7 @@ export async function sendWeeklyDigests(db: Db, now = new Date()): Promise<numbe
     );
   let sent = 0;
   for (const m of members) {
+    if (outOfTime(b)) break;
     const [[{ n: newPosts } = { n: 0 }], [{ n: unread } = { n: 0 }]] = await Promise.all([
       db
         .select({ n: count() })
@@ -226,7 +252,8 @@ export async function sendWeeklyDigests(db: Db, now = new Date()): Promise<numbe
       .returning({ userId: notificationPrefs.userId });
     if (!claimed) continue;
     const f = footer(m.id, "digest");
-    await sendMail(db, {
+    try {
+      await sendMail(db, {
       to: m.email,
       subject: "【Kakomi】今週のお知らせ",
       body: [
@@ -239,8 +266,15 @@ export async function sendWeeklyDigests(db: Db, now = new Date()): Promise<numbe
         f.text,
       ].join("\n"),
       headers: f.headers,
-    });
+      });
+    } catch (e) {
+      // 送れなかったら印を戻して、次の回（水曜まで）に送り直す。ほかの人への送信は続ける
+      await db.update(notificationPrefs).set({ lastDigestAt: m.lastDigestAt }).where(eq(notificationPrefs.userId, m.id));
+      console.error("[digest] send failed", e instanceof Error ? e.message : e);
+      continue;
+    }
     sent++;
+    await pace();
   }
   return sent;
 }

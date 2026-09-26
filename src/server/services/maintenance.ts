@@ -16,7 +16,7 @@ import {
 } from "../db/schema";
 import { PURGE_AFTER_DAYS, REVIEW_SLA_HOURS } from "../lib/policy";
 import { audit } from "./audit";
-import { dispatchPendingNotificationEmails, isDigestDay, sendWeeklyDigests } from "./email-notify";
+import { budget, dispatchPendingNotificationEmails, isDigestDay, sendWeeklyDigests } from "./email-notify";
 import { notifyAdmins } from "./notifications";
 import { removeStoredFile } from "./storage";
 
@@ -112,12 +112,19 @@ export async function runDailyMaintenance(db: Db, now = new Date()): Promise<Mai
     mails: (await db.delete(mailOutbox).where(lt(mailOutbox.createdAt, cutoff)).returning({ id: mailOutbox.id })).length,
   };
 
-  // 6) メール：送り残したお知らせと、月曜なら週 1 回のまとめ
-  const notificationEmails = await dispatchPendingNotificationEmails(db, now);
-  const digests = isDigestDay(now) ? await sendWeeklyDigests(db, now) : 0;
-
   // 画像ファイルは DB から消し終えてから消す（ファイルだけ消えて行が残る、を避ける）
   for (const f of doomedFiles) await removeStoredFile(f.key).catch(() => undefined);
+
+  // 6) メールは最後に、時間の上限付きで（送信の失敗や遅さで、ほかの片付けが止まらないように）
+  const mailBudget = budget(35_000);
+  let notificationEmails = 0;
+  let digests = 0;
+  try {
+    notificationEmails = await dispatchPendingNotificationEmails(db, now, mailBudget);
+    if (isDigestDay(now)) digests = await sendWeeklyDigests(db, now, mailBudget);
+  } catch (e) {
+    console.error("[maintenance] email step failed", e instanceof Error ? e.message : e);
+  }
 
   const report: MaintenanceReport = {
     purgedPosts: purgedPosts.length,

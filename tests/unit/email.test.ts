@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { desc, eq } from "drizzle-orm";
 import type { Db } from "@/server/db/client";
 import { mailOutbox, notifications } from "@/server/db/schema";
@@ -112,6 +112,32 @@ describe("すぐのお知らせメール", () => {
   });
 });
 
+describe("送信に失敗したとき", () => {
+  it("送った印を付けず、送信枠も戻す。次の機会に送り直せる", async () => {
+    const author = await makeUser(d);
+    const c = await makeUser(d);
+    const { id } = await createPost(d, author.viewer, { body: "x", visibility: "members" });
+    await addComment(d, c.viewer, { postId: id, body: "1" });
+    const prevKey = process.env.RESEND_API_KEY;
+    process.env.RESEND_API_KEY = "re_test";
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("rate limited", { status: 429 }));
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      expect(await dispatchNotificationEmail(d, author.user.id)).toBe(false);
+      const [n] = await d.select().from(notifications).where(eq(notifications.userId, author.user.id));
+      expect(n!.emailedAt).toBeNull();
+      // 定期処理も、1 通の失敗で止まらない
+      await expect(dispatchPendingNotificationEmails(d)).resolves.toBeTypeOf("number");
+    } finally {
+      fetchSpy.mockRestore();
+      errSpy.mockRestore();
+      if (prevKey === undefined) delete process.env.RESEND_API_KEY;
+      else process.env.RESEND_API_KEY = prevKey;
+    }
+    expect(await dispatchNotificationEmail(d, author.user.id)).toBe(true);
+  });
+});
+
 describe("配信停止のリンク", () => {
   it("署名が正しいときだけ、その人のその種類だけを止める", async () => {
     const u = await makeUser(d);
@@ -120,6 +146,8 @@ describe("配信停止のリンク", () => {
     expect(parseUnsubscribeToken(token.replace(".digest.", ".instant."))).toBeNull();
     expect(parseUnsubscribeToken(token.slice(0, -1) + (token.endsWith("0") ? "1" : "0"))).toBeNull();
     expect(parseUnsubscribeToken("garbage")).toBeNull();
+    // 文字数は同じでもバイト数が違う署名で、例外（500）を起こさない
+    expect(parseUnsubscribeToken(`${u.user.id}.digest.${"a".repeat(31)}あ`)).toBeNull();
     await expect(unsubscribe(d, "garbage")).rejects.toMatchObject({ code: "invalid" });
     await unsubscribe(d, token);
     expect(await getEmailPrefs(d, u.viewer)).toEqual({ emailInstant: true, emailDigest: false });
@@ -127,8 +155,10 @@ describe("配信停止のリンク", () => {
 });
 
 describe("週 1 回のまとめ", () => {
-  it("日本時間の月曜日だけ", () => {
+  it("日本時間の月曜（送り切れなかった分は水曜まで）", () => {
     expect(isDigestDay(new Date("2026-09-27T18:00:00Z"))).toBe(true); // 月曜 3:00 JST
+    expect(isDigestDay(new Date("2026-09-29T18:00:00Z"))).toBe(true); // 水曜 3:00 JST
+    expect(isDigestDay(new Date("2026-09-30T18:00:00Z"))).toBe(false); // 木曜 3:00 JST
     expect(isDigestDay(new Date("2026-09-27T12:00:00Z"))).toBe(false); // 日曜 21:00 JST
   });
 
