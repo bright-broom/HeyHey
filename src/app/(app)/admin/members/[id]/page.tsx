@@ -4,6 +4,7 @@ import { ROLE_LABEL, STATUS_BADGE, STATUS_LABEL } from "@/components/labels";
 import { formatDateTime } from "@/components/time";
 import { getDb } from "@/server/db/client";
 import { getUserForAdmin, inviteLineage } from "@/server/services/admin";
+import { mfaEnabled } from "@/server/services/mfa";
 import { requireAdmin } from "@/server/web/session";
 import { MemberActions } from "./MemberActions";
 
@@ -15,7 +16,7 @@ export default async function AdminMemberPage(props: PageProps<"/admin/members/[
   const db = await getDb();
   const u = await getUserForAdmin(db, viewer, id);
   if (!u) notFound();
-  const { chain, invitees } = await inviteLineage(db, viewer, id);
+  const [{ chain, invitees }, targetMfa] = await Promise.all([inviteLineage(db, viewer, id), mfaEnabled(db, u.id)]);
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
       <section className="card space-y-4 p-5">
@@ -56,7 +57,7 @@ export default async function AdminMemberPage(props: PageProps<"/admin/members/[
       </section>
       <aside className="card p-5">
         <h2 className="h2 mb-3">操作</h2>
-        <MemberActions userId={u.id} status={u.status} role={u.role} quota={u.inviteQuotaOverride} viewerIsOwner={viewer.role === "owner"} isSelf={u.id === viewer.id} />
+        <MemberActions userId={u.id} status={u.status} role={u.role} quota={u.inviteQuotaOverride} viewerIsOwner={viewer.role === "owner"} isSelf={u.id === viewer.id} targetMfa={targetMfa} />
       </aside>
     </div>
   );

@@ -364,6 +364,96 @@ export async function resendVerification(db: Db, emailRaw: string, ctx: { ip: st
   await issueVerification(db, u.id, u.email, { displayName: u.displayName });
 }
 
+// ───────── パスワードの再設定 ─────────
+
+const RESET_TTL_MIN = 60;
+const RESET_PURPOSE = "reset_password";
+
+/**
+ * 再設定メールを送る。登録の有無・状態にかかわらず呼び出し側への応答は同じにし、
+ * メールアドレスの存在確認に使えないようにする（送るのはログインできる状態の会員にだけ）。
+ */
+export async function requestPasswordReset(db: Db, emailRaw: string, ctx: { ip: string }): Promise<void> {
+  const email = normalizeEmail(emailRaw);
+  if (!email || email.length > 254) return;
+  if (!(await consume(db, `reset:${email}`, 3, 60 * 60))) return;
+  if (!(await consume(db, `reset:ip:${ctx.ip}`, 10, 60 * 60))) return;
+  const [u] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  if (!u || !["active", "pending", "unverified"].includes(u.status)) return;
+  const token = newToken();
+  await db.transaction(async (tx) => {
+    // 古い再設定リンクは無効にし、有効なリンクを常に 1 本にする
+    await tx
+      .update(emailTokens)
+      .set({ usedAt: new Date() })
+      .where(and(eq(emailTokens.userId, u.id), eq(emailTokens.purpose, RESET_PURPOSE), isNull(emailTokens.usedAt)));
+    await tx.insert(emailTokens).values({
+      tokenHash: hashToken(token),
+      userId: u.id,
+      purpose: RESET_PURPOSE,
+      expiresAt: new Date(Date.now() + RESET_TTL_MIN * 60 * 1000),
+    });
+    await sendMail(tx, {
+      to: u.email,
+      subject: "【Kakomi】パスワードの再設定",
+      body: [
+        "パスワードの再設定を受け付けました。下のリンクを開いて、新しいパスワードを設定してください。",
+        "",
+        appUrl(`/reset/${token}`),
+        "",
+        `このリンクの有効期限は ${RESET_TTL_MIN} 分で、1 回だけ使えます。`,
+        "心当たりがない場合は、このメールを破棄してください。パスワードは変わりません。",
+      ].join("\n"),
+    });
+  });
+}
+
+/**
+ * 新しいパスワードを設定する。リンクは 1 回きりで、設定後は全端末からログアウトさせる。
+ * 2 段階認証は外さない（メールアカウントだけを乗っ取られても、管理者のアカウントは守られる）。
+ */
+export async function resetPassword(db: Db, token: string, next: string): Promise<void> {
+  if (next.length < PASSWORD_MIN) throw invalid(`パスワードは ${PASSWORD_MIN} 文字以上にしてください。`);
+  if (next.length > 200) throw invalid("パスワードが長すぎます。");
+  if (!token || token.length > 200) throw invalid("再設定のリンクが無効です。");
+  const passwordHash = await hashPassword(next);
+  await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(emailTokens)
+      .set({ usedAt: new Date() })
+      .where(
+        and(
+          eq(emailTokens.tokenHash, hashToken(token)),
+          eq(emailTokens.purpose, RESET_PURPOSE),
+          isNull(emailTokens.usedAt),
+          gt(emailTokens.expiresAt, new Date()),
+        ),
+      )
+      .returning({ userId: emailTokens.userId });
+    if (!row) throw invalid("再設定のリンクが無効です。有効期限（60 分）が切れたか、すでに使用済みです。");
+    const [u] = await tx
+      .update(users)
+      .set({ passwordHash, updatedAt: new Date() })
+      .where(and(eq(users.id, row.userId), inArray(users.status, ["active", "pending", "unverified"])))
+      .returning({ id: users.id, email: users.email });
+    if (!u) throw invalid("再設定のリンクが無効です。");
+    await deleteUserSessions(tx, u.id);
+    await tx.delete(loginChallenges).where(eq(loginChallenges.userId, u.id));
+    await audit(tx, { actorId: u.id, action: "user.password_reset", targetType: "user", targetId: u.id });
+    await sendMail(tx, {
+      to: u.email,
+      subject: "【Kakomi】パスワードが変更されました",
+      body: [
+        "Kakomi のパスワードが再設定されました。すべての端末からログアウトしています。",
+        "心当たりがない場合は、すぐに運営者に連絡してください。",
+      ].join("\n"),
+    });
+  });
+  // 再設定したら、パスワードの試行ロックも解く（本人が入れなくなるのを防ぐ）
+  const [u] = await db.select({ email: users.email }).from(users).innerJoin(emailTokens, eq(emailTokens.userId, users.id)).where(eq(emailTokens.tokenHash, hashToken(token)));
+  if (u) await reset(db, `login:acct:${u.email}`);
+}
+
 export async function acceptTerms(db: Db, userId: string): Promise<void> {
   await db
     .update(users)

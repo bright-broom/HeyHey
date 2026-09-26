@@ -188,6 +188,38 @@ test("「友達のみ」の投稿は友達以外に見えない。コメント�
   await expect(ownerPage.getByText("新人さん さんがあなたの投稿にコメントしました")).toBeVisible();
 });
 
+test("パスワードを忘れても、メールのリンクから再設定して入り直せる", async ({ browser }) => {
+  const p = await newPage(browser);
+  await p.goto("/login");
+  await p.getByRole("link", { name: "パスワードを忘れた方" }).click();
+  await p.getByLabel("メールアドレス").fill(NEWBIE.email);
+  await p.getByRole("button", { name: "再設定のメールを送る" }).click();
+  await expect(p.getByText("登録済みのアドレスであれば")).toBeVisible();
+
+  await p.goto("/dev/mail");
+  const mail = p.locator(`[data-testid="mail"][data-to="${NEWBIE.email}"]`).filter({ hasText: "パスワードの再設定" }).first();
+  const resetPath = (await mail.innerText()).match(/\/reset\/[A-Za-z0-9_-]+/)![0];
+  NEWBIE.password = "newbie-password-reset-456";
+  await p.goto(resetPath);
+  await p.getByLabel("新しいパスワード", { exact: true }).fill(NEWBIE.password);
+  await p.getByLabel("新しいパスワード（確認）").fill(NEWBIE.password);
+  await p.getByRole("button", { name: "パスワードを設定する" }).click();
+  await expect(p).toHaveURL("/login?e=password_reset");
+
+  // 再設定すると全端末からログアウトされる
+  await newbiePage.goto("/");
+  await expect(newbiePage).toHaveURL(/\/login/);
+  await login(newbiePage, NEWBIE);
+  await expect(newbiePage).toHaveURL("/");
+  // 同じリンクは 2 度使えない
+  await p.goto(resetPath);
+  await p.getByLabel("新しいパスワード", { exact: true }).fill("another-password-789");
+  await p.getByLabel("新しいパスワード（確認）").fill("another-password-789");
+  await p.getByRole("button", { name: "パスワードを設定する" }).click();
+  await expect(p.getByText("再設定のリンクが無効です")).toBeVisible();
+  await p.context().close();
+});
+
 test("利用停止すると、次の操作から即座に締め出される", async () => {
   await ownerPage.goto("/admin/members?q=newbie");
   await ownerPage.getByRole("link", { name: "新人さん" }).click();

@@ -23,7 +23,8 @@
     "vercel-build": "npm run db:migrate && next build",
     "test:pg": "vitest run --config vitest.pg.config.mts",
     "mfa:reset": "tsx --conditions=react-server scripts/reset-mfa.ts",
-    "mfa:ticket": "tsx --conditions=react-server scripts/mfa-ticket.ts"
+    "mfa:ticket": "tsx --conditions=react-server scripts/mfa-ticket.ts",
+    "maintenance": "tsx --conditions=react-server scripts/maintenance.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",

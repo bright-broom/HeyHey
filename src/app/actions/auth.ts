@@ -2,7 +2,19 @@
 
 import { notFound, redirect } from "next/navigation";
 import { getDb } from "@/server/db/client";
-import { acceptTerms, changePassword, completeLogin, deleteSession, demoLogin, login, register, resendVerification, verifyEmail } from "@/server/services/auth";
+import {
+  acceptTerms,
+  changePassword,
+  completeLogin,
+  deleteSession,
+  demoLogin,
+  login,
+  register,
+  requestPasswordReset,
+  resendVerification,
+  resetPassword,
+  verifyEmail,
+} from "@/server/services/auth";
 import { demoLoginEnabled } from "@/server/lib/demo";
 import { AppError } from "@/server/lib/errors";
 import { safeLocalPath } from "@/server/lib/redirect";
@@ -126,6 +138,21 @@ export async function resendVerificationAction(_: FormState, fd: FormData): Prom
   await resendVerification(await getDb(), str(fd, "email"), { ip: await clientIp() });
   // アドレスの登録有無を明かさないため、常に同じ応答
   return { ok: "登録済みで未確認のアドレスであれば、確認メールを再送しました。" };
+}
+
+export async function forgotPasswordAction(_: FormState, fd: FormData): Promise<FormState> {
+  await requestPasswordReset(await getDb(), str(fd, "email"), { ip: await clientIp() });
+  // アドレスの登録有無を明かさないため、常に同じ応答
+  return { ok: "登録済みのアドレスであれば、パスワード再設定のメールを送りました。届かない場合は、迷惑メールフォルダも確認してください。" };
+}
+
+export async function resetPasswordAction(_: FormState, fd: FormData): Promise<FormState> {
+  if (str(fd, "next") !== str(fd, "nextConfirm")) return { error: "確認用パスワードが一致しません。" };
+  const db = await getDb();
+  const res = await attempt(() => resetPassword(db, str(fd, "token"), str(fd, "next")));
+  if (res?.error) return res;
+  await clearSessionCookie();
+  redirect("/login?e=password_reset");
 }
 
 export async function acceptTermsAction(fd: FormData) {

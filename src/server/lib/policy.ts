@@ -62,3 +62,5 @@ export const REAPPLY_COOLDOWN_DAYS = 30;
 export const INVITE_TTL_DAYS = 7;
 /** 審査の目標時間（超過を管理画面で強調） */
 export const REVIEW_SLA_HOURS = 72;
+/** 削除した投稿・退会者の情報を完全に消去するまでの日数（プライバシーポリシーに明記） */
+export const PURGE_AFTER_DAYS = 30;

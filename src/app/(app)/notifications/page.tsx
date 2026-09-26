@@ -34,6 +34,10 @@ function describe(n: N): { text: string; href?: string } {
       return { text: `新しい入会申請が届きました（${d.name ?? ""}）`, href: "/admin/applications" };
     case "report_submitted":
       return { text: "新しい通報が届きました", href: "/admin/reports" };
+    case "application_overdue":
+      return { text: `入会申請が 72 時間を超えて審査待ちです（${d.name ?? ""}）`, href: "/admin/applications" };
+    case "ownership_transferred":
+      return { text: `${d.name ?? ""} さんから、オーナー権限が移されました`, href: "/admin" };
     default:
       return { text: "お知らせがあります" };
   }
@@ -55,7 +59,7 @@ export default async function NotificationsPage() {
       </PageTitle>
       <ul className="divide-y divide-line border-b border-line">
         {items
-          .filter((n) => admin || !["application_submitted", "report_submitted"].includes(n.type))
+          .filter((n) => admin || !["application_submitted", "application_overdue", "report_submitted"].includes(n.type))
           .map((n) => {
             const { text, href } = describe(n);
             const body = (

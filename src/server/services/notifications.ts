@@ -14,7 +14,9 @@ export type NotificationType =
   | "report_resolved"
   | "moderation"
   | "application_submitted"
-  | "report_submitted";
+  | "application_overdue"
+  | "report_submitted"
+  | "ownership_transferred";
 
 export async function notify(
   db: DbOrTx,

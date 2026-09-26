@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { demoLoginEnabled } from "@/server/lib/demo";
 import { getViewer, homeFor } from "@/server/web/session";
@@ -11,6 +12,7 @@ const NOTICES: Record<string, string> = {
   password_changed: "パスワードを変更しました。新しいパスワードでログインしてください。",
   withdrawn: "退会手続きが完了しました。ご利用ありがとうございました。",
   mfa_expired: "確認の有効期限が切れたか、試行回数の上限に達しました。もう一度ログインしてください。",
+  password_reset: "パスワードを再設定しました。新しいパスワードでログインしてください。",
 };
 
 export default async function LoginPage(props: PageProps<"/login">) {
@@ -27,6 +29,11 @@ export default async function LoginPage(props: PageProps<"/login">) {
       </div>
       {notice && <p className="border-l-2 border-ink py-1 pl-3 text-sm">{notice}</p>}
       <LoginForm next={next} />
+      <p className="text-xs">
+        <Link href="/forgot" className="btn-link text-xs">
+          パスワードを忘れた方
+        </Link>
+      </p>
       <div className="rule" />
       <p className="text-xs leading-loose text-muted">
         はじめての方は、メンバーから届いた招待リンクを開いて申請してください。

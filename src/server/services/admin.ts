@@ -13,11 +13,15 @@ import {
   userMfa,
   users,
 } from "../db/schema";
-import { conflict, forbidden, invalid, notFound } from "../lib/errors";
+import { AppError, conflict, forbidden, invalid, notFound } from "../lib/errors";
+import { verifyPassword } from "../lib/password";
 import { assertAdmin, assertOwner } from "../lib/policy";
 import type { Viewer } from "../lib/viewer";
 import { audit } from "./audit";
 import { deleteUserSessions } from "./auth";
+import { checkSecondFactor, mfaEnabled } from "./mfa";
+import { notify } from "./notifications";
+import { consume } from "./ratelimit";
 import { appUrl, sendMail } from "./mailer";
 
 // ───────── 入会審査 ─────────
@@ -266,6 +270,44 @@ export async function setRole(db: Db, viewer: Viewer, userId: string, role: "mem
       await deleteUserSessions(tx, userId);
     }
     await audit(tx, { actorId: viewer.id, action: "user.set_role", targetType: "user", targetId: userId, meta: { from: target.role, to: role } });
+  });
+}
+
+/**
+ * オーナー権限の移譲。相手は承認済みで 2 段階認証を設定済みの管理者に限り、
+ * 移す側はパスワードと認証アプリのコードで本人確認する（最も強い権限なので、セッションだけでは動かさない）。
+ * 移した後、元のオーナーは管理者になる。オーナーが 2 人にならないよう、
+ * 「自分がまだオーナーであること」を条件に先に降格してから、相手を昇格する。
+ */
+export async function transferOwnership(db: Db, viewer: Viewer, userId: string, input: { password: string; code: string }) {
+  assertOwner(viewer);
+  const target = await loadTarget(db, userId);
+  if (target.id === viewer.id) throw invalid("自分自身には移せません。");
+  if (target.role !== "admin" || target.status !== "active" || !target.termsAcceptedAt) {
+    throw conflict("オーナー権限を移せるのは、承認済みの管理者だけです。先に管理者に任命してください。");
+  }
+  if (!(await mfaEnabled(db, target.id))) throw conflict("移す相手が 2 段階認証を設定していません。先に設定してもらってください。");
+  if (!(await consume(db, `owner:transfer:${viewer.id}`, 5, 15 * 60))) {
+    throw new AppError("rate_limited", "試行回数が上限に達しました。15 分ほど待ってから再度お試しください。");
+  }
+  const [me] = await db.select({ passwordHash: users.passwordHash }).from(users).where(eq(users.id, viewer.id));
+  if (!me || !(await verifyPassword(input.password, me.passwordHash))) throw invalid("パスワードが正しくありません。");
+  await db.transaction(async (tx) => {
+    if ((await checkSecondFactor(tx, viewer.id, input.code)) !== "totp") throw invalid("確認コードが正しくありません。");
+    const [demoted] = await tx
+      .update(users)
+      .set({ role: "admin", updatedAt: new Date() })
+      .where(and(eq(users.id, viewer.id), eq(users.role, "owner")))
+      .returning({ id: users.id });
+    if (!demoted) throw conflict("すでにオーナーではありません。");
+    const [promoted] = await tx
+      .update(users)
+      .set({ role: "owner", updatedAt: new Date() })
+      .where(and(eq(users.id, target.id), eq(users.role, "admin"), eq(users.status, "active")))
+      .returning({ id: users.id });
+    if (!promoted) throw conflict("相手の状態が変わったため、移せませんでした。");
+    await audit(tx, { actorId: viewer.id, action: "user.transfer_ownership", targetType: "user", targetId: target.id, meta: { from: viewer.id, to: target.id } });
+    await notify(tx, { userId: target.id, type: "ownership_transferred", actorId: viewer.id, data: { name: viewer.displayName } });
   });
 }
 

@@ -2,8 +2,9 @@ import { PageTitle } from "@/components/PageTitle";
 import Link from "next/link";
 import { formatDateTime } from "@/components/time";
 import { getDb } from "@/server/db/client";
-import { REVIEW_SLA_HOURS } from "@/server/lib/policy";
+import { isOwner, REVIEW_SLA_HOURS } from "@/server/lib/policy";
 import { dashboard } from "@/server/services/admin";
+import { releaseChecks } from "@/server/services/readiness";
 import { requireAdmin } from "@/server/web/session";
 
 export const metadata = { title: "管理" };
@@ -22,7 +23,8 @@ function Stat({ label, value, sub, href, alert }: { label: string; value: string
 
 export default async function AdminHome() {
   const viewer = await requireAdmin();
-  const s = await dashboard(await getDb(), viewer);
+  const db = await getDb();
+  const [s, checks] = await Promise.all([dashboard(db, viewer), isOwner(viewer) ? releaseChecks(db, viewer) : null]);
   const oldestHours = s.oldestPendingAt ? (Date.now() - s.oldestPendingAt.getTime()) / 3600_000 : 0;
   const overdue = oldestHours > REVIEW_SLA_HOURS;
   return (
@@ -44,6 +46,42 @@ export default async function AdminHome() {
         <Stat label="今週のコメント" value={s.commentsThisWeek} />
         <Stat label="今週の招待発行" value={s.invitesThisWeek} />
       </div>
+      {checks && <ReleaseChecks checks={checks} />}
     </div>
+  );
+}
+
+/** オーナーだけに見せる、本番を開く前の設定確認 */
+function ReleaseChecks({ checks }: { checks: Awaited<ReturnType<typeof releaseChecks>> }) {
+  const done = checks.filter((c) => c.ok).length;
+  return (
+    <section aria-labelledby="readiness-title" className="mt-20">
+      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-line pb-4">
+        <div>
+          <p className="plaque">RELEASE CHECK · OWNER ONLY</p>
+          <h2 id="readiness-title" className="h2 mt-2">リリース前チェック</h2>
+        </div>
+        <p className="text-sm tabular-nums text-muted">
+          {done} / {checks.length} 完了
+        </p>
+      </div>
+      <ul className="divide-y divide-line border-b border-line">
+        {checks.map((c) => (
+          <li key={c.id} className="grid gap-1 py-4 sm:grid-cols-[1.5rem_16rem_1fr] sm:gap-4" data-testid="readiness" data-ok={c.ok}>
+            <span aria-hidden className={`mt-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full border text-[10px] ${c.ok ? "border-ok bg-ok text-light" : "border-danger text-danger"}`}>
+              {c.ok ? "✓" : "!"}
+            </span>
+            <p className="text-sm">
+              <span className="sr-only">{c.ok ? "完了：" : "未完了："}</span>
+              {c.label}
+            </p>
+            <div className="text-xs leading-relaxed text-muted">
+              <p>{c.detail}</p>
+              {!c.ok && <p className="mt-1 text-ink-soft">対応：{c.fix}</p>}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
