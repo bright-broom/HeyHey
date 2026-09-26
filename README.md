@@ -135,7 +135,7 @@ Server Actions は外部から直接呼べる HTTP エンドポイントなの�
 npm run typecheck
 npm test            # 157 件：公開範囲・入会フロー・通報と処分・権限境界・画像・2 段階認証・運用機能・ブロック・メンション・メール・グループ・レビュー指摘の回帰
 TEST_DATABASE_URL=postgres://... npm run test:pg   # 同じテストを実際の PostgreSQL で（本番と同じドライバ）
-npm run build && npm run test:e2e   # 9 件：本番ビルドをブラウザで操作（招待→2 段階認証→承認→投稿→パスワード再設定→停止）
+npm run build && npm run test:e2e   # 10 件：本番ビルドをブラウザで操作（招待→2 段階認証→承認→投稿→グループ→パスワード再設定→停止）
 npm run verify      # 上記すべて
 ```
 

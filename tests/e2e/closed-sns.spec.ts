@@ -188,6 +188,34 @@ test("「友達のみ」の投稿は友達以外に見えない。コメント�
   await expect(ownerPage.getByText("新人さん さんがあなたの投稿にコメントしました")).toBeVisible();
 });
 
+test("承認制のグループ：投稿はメンバーにだけ見え、承認されると見えるようになる", async () => {
+  await ownerPage.goto("/groups/new");
+  await ownerPage.getByLabel("グループ名").fill("E2E 写真部");
+  await ownerPage.getByRole("button", { name: "グループを作る" }).click();
+  await expect(ownerPage.getByRole("heading", { name: "E2E 写真部" })).toBeVisible();
+  const groupUrl = ownerPage.url();
+  await ownerPage.getByLabel("本文").fill("グループの中だけの話");
+  await ownerPage.getByRole("button", { name: "投稿する" }).click();
+  await expect(ownerPage.getByText("グループの中だけの話")).toBeVisible();
+
+  const p = newbiePage;
+  await p.goto("/");
+  await expect(p.getByText("グループの中だけの話")).toHaveCount(0);
+  await p.goto(groupUrl);
+  await p.getByRole("button", { name: "参加を申請する" }).click();
+  await expect(p.getByText("承認待ちです")).toBeVisible();
+  await expect(p.getByText("グループの中だけの話")).toHaveCount(0);
+
+  await ownerPage.goto(groupUrl);
+  await ownerPage.getByRole("button", { name: "承認", exact: true }).click();
+  await expect(ownerPage.getByText("参加を承認しました。")).toBeVisible();
+
+  await p.goto(groupUrl);
+  await expect(p.getByText("グループの中だけの話")).toBeVisible();
+  await p.goto("/");
+  await expect(p.getByText("グループの中だけの話")).toBeVisible();
+});
+
 test("パスワードを忘れても、メールのリンクから再設定して入り直せる", async ({ browser }) => {
   const p = await newPage(browser);
   await p.goto("/login");
