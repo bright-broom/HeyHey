@@ -10,6 +10,7 @@ import {
   notifications,
   posts,
   rateLimits,
+  reports,
   sessions,
   users,
 } from "../db/schema";
@@ -36,23 +37,23 @@ export type MaintenanceReport = {
 export async function runDailyMaintenance(db: Db, now = new Date()): Promise<MaintenanceReport> {
   const cutoff = new Date(now.getTime() - PURGE_AFTER_DAYS * DAY);
 
+  // 未処理の通報がかかっているものは、対応が終わるまで消さない（本人が消しても証拠を残す）
+  const postUnderReview = sql`EXISTS (SELECT 1 FROM ${reports} WHERE ${reports.status} = 'open' AND (
+    (${reports.targetType} = 'post' AND ${reports.targetId} = ${posts.id}) OR
+    (${reports.targetType} = 'comment' AND ${reports.targetId} IN (SELECT ${comments.id} FROM ${comments} WHERE ${comments.postId} = ${posts.id}))))`;
+  const commentUnderReview = sql`EXISTS (SELECT 1 FROM ${reports} WHERE ${reports.status} = 'open' AND ${reports.targetType} = 'comment' AND ${reports.targetId} = ${comments.id})`;
+  const postDoomed = and(isNotNull(posts.deletedAt), lt(posts.deletedAt, cutoff), sql`NOT ${postUnderReview}`);
+
   // 1) 削除から 30 日たった投稿を完全に消す（コメント・リアクション・画像の行は外部キーで一緒に消える）
-  const doomedFiles = await db
-    .select({ key: media.storageKey })
-    .from(media)
-    .innerJoin(posts, eq(posts.id, media.postId))
-    .where(and(isNotNull(posts.deletedAt), lt(posts.deletedAt, cutoff)));
-  const purgedPosts = await db
-    .delete(posts)
-    .where(and(isNotNull(posts.deletedAt), lt(posts.deletedAt, cutoff)))
-    .returning({ id: posts.id });
+  const doomedFiles = await db.select({ key: media.storageKey }).from(media).innerJoin(posts, eq(posts.id, media.postId)).where(postDoomed);
+  const purgedPosts = await db.delete(posts).where(postDoomed).returning({ id: posts.id });
 
   // 2) 削除から 30 日たったコメントは、本文を消して「削除済み」の抜け殻だけ残す
   //    （返信がぶら下がっていることがあるので、行ごとは消さない）
   const erasedComments = await db
     .update(comments)
     .set({ body: "" })
-    .where(and(isNotNull(comments.deletedAt), lt(comments.deletedAt, cutoff), sql`${comments.body} <> ''`))
+    .where(and(isNotNull(comments.deletedAt), lt(comments.deletedAt, cutoff), sql`${comments.body} <> ''`, sql`NOT ${commentUnderReview}`))
     .returning({ id: comments.id });
 
   // 3) 退会から 30 日たった人の残りの個人情報を消す（申請内容・届いた通知）

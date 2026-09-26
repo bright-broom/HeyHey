@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { Db } from "@/server/db/client";
-import { applications, auditLogs, comments, mailOutbox, notifications, posts, sessions, users } from "@/server/db/schema";
+import { applications, auditLogs, comments, mailOutbox, notifications, posts, reports, sessions, users } from "@/server/db/schema";
 import { totpCode, totpStep } from "@/server/lib/totp";
 import { transferOwnership } from "@/server/services/admin";
 import { createSession, login, requestPasswordReset, resetPassword, userFromSession } from "@/server/services/auth";
@@ -119,6 +119,26 @@ describe("毎日の定期処理", () => {
     expect(erased!.body).toBe("");
   });
 
+  it("未処理の通報がかかった投稿・コメントは、本人が消しても 30 日で消さない（対応が終わってから消す）", async () => {
+    const author = await makeUser(d);
+    const reporter = await makeUser(d);
+    const reported = await rawPost(d, author.user.id, { body: "通報された投稿", deletedAt: new Date(Date.now() - 31 * DAY) });
+    const live = await rawPost(d, author.user.id);
+    const [c] = await d.insert(comments).values({ postId: live.id, authorId: author.user.id, body: "通報されたコメント", deletedAt: new Date(Date.now() - 31 * DAY) }).returning();
+    await d.insert(reports).values([
+      { reporterId: reporter.user.id, targetType: "post", targetId: reported.id, targetUserId: author.user.id, reason: "harassment" },
+      { reporterId: reporter.user.id, targetType: "comment", targetId: c!.id, targetUserId: author.user.id, reason: "harassment" },
+    ]);
+    await runDailyMaintenance(d);
+    expect(await d.select().from(posts).where(eq(posts.id, reported.id))).toHaveLength(1);
+    expect((await d.select().from(comments).where(eq(comments.id, c!.id)))[0]!.body).toBe("通報されたコメント");
+
+    await d.update(reports).set({ status: "resolved", resolution: "dismissed", resolvedAt: new Date() }).where(eq(reports.reporterId, reporter.user.id));
+    await runDailyMaintenance(d);
+    expect(await d.select().from(posts).where(eq(posts.id, reported.id))).toHaveLength(0);
+    expect((await d.select().from(comments).where(eq(comments.id, c!.id)))[0]!.body).toBe("");
+  });
+
   it("退会から 30 日たった人の申請内容と通知を消す", async () => {
     const m = await makeUser(d);
     await d.insert(applications).values({ userId: m.user.id, fullName: "（退会）", affiliation: "", relationship: "", introduction: "" });
@@ -162,6 +182,8 @@ describe("毎日の定期処理", () => {
       process.env.CRON_SECRET = "s3cret-value-for-test";
       expect((await call()).status).toBe(404);
       expect((await call("Bearer wrong-value-for-test!")).status).toBe(404);
+      // 文字数は同じでもバイト数が違う値で、例外（500）や長さの推測を起こさない
+      expect((await call("Bearer " + "é".repeat("s3cret-value-for-test".length))).status).toBe(404);
       const ok = await call("Bearer s3cret-value-for-test");
       expect(ok.status).toBe(200);
       expect(await ok.json()).toHaveProperty("expired");

@@ -1,6 +1,7 @@
 "use server";
 
 import { notFound, redirect } from "next/navigation";
+import { after } from "next/server";
 import { getDb } from "@/server/db/client";
 import {
   acceptTerms,
@@ -134,15 +135,31 @@ export async function verifyAction(_: FormState, fd: FormData): Promise<FormStat
   return { ok: "メールアドレスを確認しました。管理者の審査が終わるとメールでお知らせします。" };
 }
 
+/**
+ * 応答を返した後に処理する（登録済みのときだけメール送信で遅くなる・送信失敗でエラーになる、
+ * という違いから、アドレスが登録済みかどうかを推測されないように）
+ */
+async function afterResponse(label: string, fn: () => Promise<void>) {
+  after(async () => {
+    try {
+      await fn();
+    } catch (e) {
+      console.error(`[${label}]`, e);
+    }
+  });
+}
+
 export async function resendVerificationAction(_: FormState, fd: FormData): Promise<FormState> {
-  await resendVerification(await getDb(), str(fd, "email"), { ip: await clientIp() });
+  const [email, ip] = [str(fd, "email"), await clientIp()];
+  await afterResponse("resend-verification", async () => resendVerification(await getDb(), email, { ip }));
   // アドレスの登録有無を明かさないため、常に同じ応答
   return { ok: "登録済みで未確認のアドレスであれば、確認メールを再送しました。" };
 }
 
 export async function forgotPasswordAction(_: FormState, fd: FormData): Promise<FormState> {
-  await requestPasswordReset(await getDb(), str(fd, "email"), { ip: await clientIp() });
-  // アドレスの登録有無を明かさないため、常に同じ応答
+  const [email, ip] = [str(fd, "email"), await clientIp()];
+  await afterResponse("password-reset", async () => requestPasswordReset(await getDb(), email, { ip }));
+  // アドレスの登録有無を明かさないため、常に同じ応答（処理は応答の後）
   return { ok: "登録済みのアドレスであれば、パスワード再設定のメールを送りました。届かない場合は、迷惑メールフォルダも確認してください。" };
 }
 

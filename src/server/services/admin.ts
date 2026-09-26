@@ -294,6 +294,8 @@ export async function transferOwnership(db: Db, viewer: Viewer, userId: string, 
   if (!me || !(await verifyPassword(input.password, me.passwordHash))) throw invalid("パスワードが正しくありません。");
   await db.transaction(async (tx) => {
     if ((await checkSecondFactor(tx, viewer.id, input.code)) !== "totp") throw invalid("確認コードが正しくありません。");
+    // 確認の後に相手の 2 段階認証が解除されていた場合も通さない
+    if (!(await mfaEnabled(tx, target.id))) throw conflict("移す相手が 2 段階認証を設定していません。");
     const [demoted] = await tx
       .update(users)
       .set({ role: "admin", updatedAt: new Date() })
