@@ -21,7 +21,8 @@
     "verify": "npm run typecheck && npm test && npm run build && npm run test:e2e",
     "demo": "npm run db:migrate && npm run db:seed -- --demo",
     "vercel-build": "npm run db:migrate && next build",
-    "test:pg": "vitest run --config vitest.pg.config.mts"
+    "test:pg": "vitest run --config vitest.pg.config.mts",
+    "mfa:reset": "tsx --conditions=react-server scripts/reset-mfa.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
@@ -34,6 +35,7 @@
     "react-dom": "^19.3.0",
     "server-only": "^0.0.1",
     "sharp": "^0.35.4",
+    "uqr": "^0.1.3",
     "zod": "^4.6.5"
   },
   "devDependencies": {

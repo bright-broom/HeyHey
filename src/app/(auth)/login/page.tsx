@@ -8,6 +8,7 @@ const NOTICES: Record<string, string> = {
   inactive: "このアカウントは現在ご利用いただけません。",
   password_changed: "パスワードを変更しました。新しいパスワードでログインしてください。",
   withdrawn: "退会手続きが完了しました。ご利用ありがとうございました。",
+  mfa_expired: "確認の有効期限が切れたか、試行回数の上限に達しました。もう一度ログインしてください。",
 };
 
 export default async function LoginPage(props: PageProps<"/login">) {

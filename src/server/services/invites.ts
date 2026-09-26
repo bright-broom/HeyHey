@@ -19,7 +19,7 @@ export async function inviteQuotaStatus(db: DbOrTx, viewer: Viewer) {
     .select({ override: users.inviteQuotaOverride })
     .from(users)
     .where(eq(users.id, viewer.id));
-  const quota = monthlyInviteQuota(viewer.role, me?.override ?? null);
+  const quota = monthlyInviteQuota(viewer, me?.override ?? null);
   const [row] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(invitations)

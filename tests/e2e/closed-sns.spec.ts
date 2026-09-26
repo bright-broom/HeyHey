@@ -1,5 +1,6 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import sharp from "sharp";
+import { totpCode, totpStep } from "../../src/server/lib/totp";
 
 /**
  * 許可制 SNS の一連の流れを、本番ビルド＋ブラウザで通す。
@@ -28,7 +29,7 @@ async function newPage(browser: Browser) {
 }
 
 test("未ログインでは何も見えない", async ({ page }) => {
-  for (const path of ["/", "/members", "/admin", "/posts/00000000-0000-0000-0000-000000000000"]) {
+  for (const path of ["/", "/members", "/admin", "/settings/security", "/login/2fa", "/posts/00000000-0000-0000-0000-000000000000"]) {
     await page.goto(path);
     await expect(page).toHaveURL(/\/login/);
   }
@@ -64,6 +65,41 @@ test("オーナーが画像付きで投稿し、招待リンクを発行する",
   await ownerPage.getByRole("button", { name: "招待リンクを発行" }).click();
   inviteUrl = await ownerPage.getByTestId("invite-url").inputValue();
   expect(inviteUrl).toMatch(/\/join\/[A-Za-z0-9_-]{40,}$/);
+});
+
+test("オーナーも 2 段階認証を設定するまで管理画面に入れない。設定後のログインはコードが必要", async ({ browser }) => {
+  await ownerPage.goto("/admin/applications");
+  await expect(ownerPage).toHaveURL("/settings/security?required=1");
+  await expect(ownerPage.getByText("管理者は 2 段階認証が必須です")).toBeVisible();
+
+  await ownerPage.getByRole("button", { name: "設定を始める" }).click();
+  await expect(ownerPage.getByRole("img", { name: "認証アプリに登録する QR コード" })).toBeVisible();
+  const secret = (await ownerPage.getByTestId("mfa-secret").getAttribute("data-secret"))!;
+  const usedStep = totpStep(Date.now());
+  await ownerPage.getByLabel("認証アプリの 6 桁のコード").fill(totpCode(secret, usedStep));
+  await ownerPage.getByLabel("パスワード").fill(OWNER.password);
+  await ownerPage.getByRole("button", { name: "確認して有効にする" }).click();
+  await expect(ownerPage.getByTestId("recovery-codes").locator("li")).toHaveCount(10);
+  await ownerPage.getByRole("link", { name: "控えました" }).click();
+  await expect(ownerPage).toHaveURL("/admin");
+
+  // 別の端末からログインすると、パスワードの後にコードを求められる
+  const p = await newPage(browser);
+  await login(p, OWNER);
+  await expect(p).toHaveURL("/login/2fa");
+  await p.goto("/admin");
+  await expect(p).toHaveURL(/\/login/); // コード入力前はセッションがない
+  await p.goto("/login/2fa");
+  await p.getByLabel("確認コード").fill(totpCode(secret, usedStep + 5));
+  await p.getByRole("button", { name: "確認する" }).click();
+  await expect(p.getByText("確認コードが正しくありません。")).toBeVisible();
+  // 使用済みのステップは受け付けないので、次のステップのコードを使う（±1 ステップは許容範囲）
+  await p.getByLabel("確認コード").fill(totpCode(secret, Math.max(totpStep(Date.now()), usedStep + 1)));
+  await p.getByRole("button", { name: "確認する" }).click();
+  await expect(p).toHaveURL("/");
+  await p.goto("/admin");
+  await expect(p).toHaveURL("/admin");
+  await p.context().close();
 });
 
 test("招待リンクから申請し、メールで確認する", async ({ browser }) => {

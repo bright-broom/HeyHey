@@ -33,6 +33,8 @@ export default defineConfig({
       OWNER_PASSWORD: "owner-password-123",
       OWNER_NAME: "オーナー",
       NEXT_TELEMETRY_DISABLED: "1",
+      // 本番と同じく、明示した鍵で 2 段階認証の秘密鍵を暗号化する（テスト専用の値）
+      MFA_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
     },
   },
 });

@@ -6,7 +6,7 @@ import { FlashToast } from "@/components/Flash";
 import { NavLinks } from "@/components/NavLinks";
 import { getDb } from "@/server/db/client";
 import { profiles } from "@/server/db/schema";
-import { isAdmin } from "@/server/lib/policy";
+import { hasAdminRole } from "@/server/lib/policy";
 import { unreadCount } from "@/server/services/notifications";
 import { readFlash } from "@/server/web/flash";
 import { requireMember } from "@/server/web/session";
@@ -45,7 +45,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 aria-label="メンバーを検索"
               />
             </form>
-            {isAdmin(viewer) && (
+            {hasAdminRole(viewer) && (
               <Link href="/admin" className="plaque hover:text-ink">
                 ADMIN
               </Link>
@@ -70,6 +70,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <NavLinks items={nav} label="メインメニュー" />
         </div>
       </header>
+      {hasAdminRole(viewer) && !viewer.mfa && (
+        <div className="border-b border-line bg-light">
+          <p className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3 text-sm sm:px-8">
+            <span>管理機能を使うには、2 段階認証の設定が必要です。</span>
+            <Link href="/settings/security" className="btn-link">
+              設定する
+            </Link>
+          </p>
+        </div>
+      )}
       <main className="mx-auto max-w-6xl px-5 py-10 sm:px-8 lg:py-14">{children}</main>
       <FlashToast flash={await readFlash()} />
     </div>

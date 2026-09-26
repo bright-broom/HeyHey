@@ -10,13 +10,17 @@ import { randomBytes } from "node:crypto";
 import sharp from "sharp";
 import { eq, sql } from "drizzle-orm";
 import { closeDb, getDb, type Db } from "../src/server/db/client";
-import { applications, friendships, profiles, users } from "../src/server/db/schema";
+import { applications, friendships, profiles, userMfa, users } from "../src/server/db/schema";
 import { hashPassword } from "../src/server/lib/password";
+import { seal } from "../src/server/lib/secretbox";
+import { sealAad } from "../src/server/services/mfa";
 import { toViewer } from "../src/server/lib/viewer";
 import { createPost, addComment, toggleReaction } from "../src/server/services/posts";
 import { createReport } from "../src/server/services/reports";
 
 const DEMO_PASSWORD = "demo-password-123";
+/** デモのオーナー・管理者の 2 段階認証の鍵（ローカル専用。認証アプリに手入力すればコードが出る） */
+const DEMO_TOTP_SECRET = "KAKOMIDEMOKAKOMIDEMOKAKOMIDEMO23";
 
 async function createUser(db: Db, o: { email: string; name: string; password: string; role?: "member" | "admin" | "owner"; status?: "active" | "pending"; invitedById?: string | null; affiliation?: string; bio?: string }) {
   const now = new Date();
@@ -41,6 +45,11 @@ async function createUser(db: Db, o: { email: string; name: string; password: st
 
 async function main() {
   const demo = process.argv.includes("--demo");
+  // デモ用の既知のパスワード・2 段階認証の鍵を、本番の DB に入れてしまわないように
+  if (demo && (process.env.DATABASE_URL || process.env.VERCEL)) {
+    console.error("--demo はローカル（PGlite）専用です。DATABASE_URL を外して実行してください。");
+    process.exit(1);
+  }
   const db = await getDb();
   const [{ n } = { n: 0 }] = await db.select({ n: sql<number>`count(*)::int` }).from(users);
 
@@ -68,6 +77,9 @@ async function seedDemo(db: Db) {
   }
   const [owner] = await db.select().from(users).where(eq(users.role, "owner")).limit(1);
   const admin = await createUser(db, { email: "admin@example.com", name: "管理 花子", password: DEMO_PASSWORD, role: "admin", invitedById: owner!.id, affiliation: "運営チーム", bio: "入会審査と通報対応を担当しています。" });
+  for (const u of [owner!, admin]) {
+    await db.insert(userMfa).values({ userId: u.id, secretEnc: seal(DEMO_TOTP_SECRET, sealAad(u.id)), enabledAt: new Date() }).onConflictDoNothing();
+  }
   const sato = await createUser(db, { email: "sato@example.com", name: "佐藤 健", password: DEMO_PASSWORD, invitedById: owner!.id, affiliation: "株式会社サンプル", bio: "週末は山登りをしています。" });
   const tanaka = await createUser(db, { email: "tanaka@example.com", name: "田中 美咲", password: DEMO_PASSWORD, invitedById: sato.id, affiliation: "デザイン事務所", bio: "UI デザイナー。写真も好きです。" });
   const suzuki = await createUser(db, { email: "suzuki@example.com", name: "鈴木 大輔", password: DEMO_PASSWORD, invitedById: sato.id, affiliation: "フリーランス" });
@@ -108,6 +120,7 @@ async function seedDemo(db: Db) {
 
   console.log("✓ デモデータを作成しました（パスワードはすべて " + DEMO_PASSWORD + "）");
   console.log("  admin@example.com（管理者） / sato@example.com / tanaka@example.com / suzuki@example.com");
+  console.log(`  オーナーと管理者は 2 段階認証が有効。認証アプリに次の鍵を登録してください：${DEMO_TOTP_SECRET}`);
   console.log("  審査待ち：山田 太郎　未処理の通報：1 件");
   void admin;
 }

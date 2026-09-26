@@ -21,6 +21,15 @@ export async function consume(db: DbOrTx, key: string, limit: number, windowSec:
   return (row?.count ?? 0) <= limit;
 }
 
+/** 消費せずに、いまのウィンドウで上限に達しているかだけを見る（正解の入力もロック中は通さないため） */
+export async function isLocked(db: DbOrTx, key: string, limit: number, windowSec: number): Promise<boolean> {
+  const [row] = await db
+    .select({ count: rateLimits.count })
+    .from(rateLimits)
+    .where(sql`${rateLimits.key} = ${key} AND ${rateLimits.windowStartedAt} > now() - make_interval(secs => ${windowSec})`);
+  return !!row && row.count >= limit;
+}
+
 export async function reset(db: DbOrTx, key: string): Promise<void> {
   await db.delete(rateLimits).where(sql`${rateLimits.key} = ${key}`);
 }

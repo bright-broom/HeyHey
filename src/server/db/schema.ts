@@ -96,6 +96,53 @@ export const sessions = pgTable(
   (t) => [index("sessions_user_idx").on(t.userId)],
 );
 
+/**
+ * 2 段階認証（TOTP）。enabledAt が null の行は「設定途中」（QR を表示して確認コード待ち）。
+ * 秘密鍵は MFA_ENCRYPTION_KEY で暗号化して持つ（lib/secretbox）。
+ */
+export const userMfa = pgTable("user_mfa", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  secretEnc: text("secret_enc").notNull(),
+  enabledAt: ts("enabled_at"),
+  /** 最後に受け付けた TOTP のステップ。これ以下は受け付けない（リプレイ防止） */
+  lastUsedStep: integer("last_used_step"),
+  createdAt: createdAt(),
+});
+
+/** リカバリーコード。ハッシュだけを持ち、1 回使うと usedAt が入る */
+export const mfaRecoveryCodes = pgTable(
+  "mfa_recovery_codes",
+  {
+    codeHash: text("code_hash").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    usedAt: ts("used_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("mfa_recovery_codes_user_idx").on(t.userId)],
+);
+
+/**
+ * パスワードは通ったが 2 段階目がまだのログイン。セッションとは別のテーブルにして、
+ * 「半分だけ認証された」状態がセッションとして扱われる経路を構造的になくす。
+ */
+export const loginChallenges = pgTable(
+  "login_challenges",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    attempts: integer("attempts").notNull().default(0),
+    expiresAt: ts("expires_at").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("login_challenges_user_idx").on(t.userId)],
+);
+
 export const emailTokens = pgTable("email_tokens", {
   tokenHash: text("token_hash").primaryKey(),
   userId: uuid("user_id")

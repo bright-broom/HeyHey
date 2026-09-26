@@ -2,12 +2,22 @@
 
 import { redirect } from "next/navigation";
 import { getDb } from "@/server/db/client";
-import { acceptTerms, changePassword, deleteSession, login, register, resendVerification, verifyEmail } from "@/server/services/auth";
+import { acceptTerms, changePassword, completeLogin, deleteSession, login, register, resendVerification, verifyEmail } from "@/server/services/auth";
 import { safeLocalPath } from "@/server/lib/redirect";
 import { toViewer } from "@/server/lib/viewer";
 import { attempt, str, type FormState } from "@/server/web/action";
 import { setFlash } from "@/server/web/flash";
-import { clearSessionCookie, clientIp, getViewer, homeFor, readSessionToken, setSessionCookie } from "@/server/web/session";
+import {
+  clearChallengeCookie,
+  clearSessionCookie,
+  clientIp,
+  getViewer,
+  homeFor,
+  readChallengeToken,
+  readSessionToken,
+  setChallengeCookie,
+  setSessionCookie,
+} from "@/server/web/session";
 
 const LOGIN_MESSAGES = {
   invalid: "メールアドレスまたはパスワードが正しくありません。",
@@ -15,15 +25,38 @@ const LOGIN_MESSAGES = {
   suspended: "このアカウントは利用停止中です。管理者にお問い合わせください。",
   rejected: "このアカウントではログインできません。",
   withdrawn: "メールアドレスまたはパスワードが正しくありません。",
+  expired: "確認の有効期限が切れました。もう一度ログインしてください。",
 } as const;
 
 export async function loginAction(_: FormState, fd: FormData): Promise<FormState> {
   const db = await getDb();
   const res = await login(db, { email: str(fd, "email"), password: str(fd, "password"), ip: await clientIp() });
-  if (!res.ok) return { error: LOGIN_MESSAGES[res.reason], fields: { email: str(fd, "email") } };
+  if (res.ok === false) return { error: LOGIN_MESSAGES[res.reason], fields: { email: str(fd, "email") } };
+  const safeNext = safeLocalPath(str(fd, "next"));
+  if (res.ok === "mfa") {
+    await setChallengeCookie(res.challenge, res.expiresAt);
+    redirect(safeNext ? `/login/2fa?next=${encodeURIComponent(safeNext)}` : "/login/2fa");
+  }
+  await setSessionCookie(res.token, res.expiresAt);
+  const home = homeFor(toViewer(res.user, { mfa: res.mfa }));
+  redirect(home === "/" && safeNext ? safeNext : home);
+}
+
+/** ログインの 2 段階目（認証アプリのコード、またはリカバリーコード） */
+export async function loginCodeAction(_: FormState, fd: FormData): Promise<FormState> {
+  const challenge = await readChallengeToken();
+  if (!challenge) redirect("/login?e=mfa_expired");
+  const res = await completeLogin(await getDb(), { challenge, code: str(fd, "code") });
+  if (res.ok !== true) {
+    if (res.ok === false && res.reason === "invalid") return { error: "確認コードが正しくありません。" };
+    await clearChallengeCookie();
+    if (res.ok === false && res.reason === "rate_limited") return { error: LOGIN_MESSAGES.rate_limited };
+    redirect(res.ok === false && res.reason === "expired" ? "/login?e=mfa_expired" : "/login?e=inactive");
+  }
+  await clearChallengeCookie();
   await setSessionCookie(res.token, res.expiresAt);
   const safeNext = safeLocalPath(str(fd, "next"));
-  const home = homeFor(toViewer(res.user));
+  const home = homeFor(toViewer(res.user, { mfa: res.mfa }));
   redirect(home === "/" && safeNext ? safeNext : home);
 }
 
@@ -31,6 +64,7 @@ export async function logoutAction() {
   const token = await readSessionToken();
   if (token) await deleteSession(await getDb(), token);
   await clearSessionCookie();
+  await clearChallengeCookie();
   redirect("/login");
 }
 

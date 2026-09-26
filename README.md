@@ -15,6 +15,7 @@ npm run dev       # http://localhost:3000
 ```
 
 デモのログイン情報（パスワードはすべて `demo-password-123`）です。
+オーナーと管理者は 2 段階認証が有効なので、認証アプリ（Google Authenticator・1Password など）に鍵 `KAKOMIDEMOKAKOMIDEMOKAKOMIDEMO23` を手入力で登録しておきます（デモ専用の鍵）。
 
 | メール | 役割 | 試せること |
 | --- | --- | --- |
@@ -50,6 +51,15 @@ vercel deploy --prod
 | `EMAIL_VERIFICATION` | `off` の間はメール確認を省き、招待リンク＋管理者の承認だけで入会する（現在 `off`） |
 | `RESEND_API_KEY` / `MAIL_FROM` | メール送信（Resend）。設定したら `EMAIL_VERIFICATION` を削除して再デプロイ |
 | `APP_URL` | 独自ドメインを使うときだけ設定。未設定なら Vercel の本番ドメインを自動で使う |
+| `MFA_ENCRYPTION_KEY` | **必須**。2 段階認証の秘密鍵を暗号化する鍵（`openssl rand -base64 32`）。失うと全員の 2 段階認証が使えなくなるので、DB とは別の場所に控える |
+
+2 段階認証は管理者以上で必須です。
+管理者がスマートフォンもリカバリーコードも失ったときは、本人確認のうえで運営者が解除します（監査ログに残り、全端末からログアウトされます）。
+
+```bash
+set -a; source .env.production.local; set +a
+npm run mfa:reset -- someone@example.com "解除の理由と本人確認の方法"
+```
 
 オーナーアカウントの作り直しや追加は、本番の環境変数を取り込んでから `scripts/seed.ts` を実行します（会員が 0 人のときだけ作成）。
 
@@ -80,6 +90,8 @@ Server Actions は外部から直接呼べる HTTP エンドポイントなの�
 5. **画像は中身で判定して再エンコード**：WebP に変換する過程で EXIF・位置情報を含むメタデータがすべて落ちます。
 配信は毎回ログインと公開範囲を確認し、見えない画像は 404 を返します（存在も明かしません）。
 6. **招待トークン・セッション・確認トークンは DB にハッシュだけを保存**：DB が漏れても URL や Cookie は復元できません。
+7. **管理権限は 2 段階認証が前提**：`policy.isAdmin` が 2 段階認証の有無を見るので、未設定の管理者は管理機能を 1 つも使えません。
+2 段階認証の秘密鍵は DB とは別の鍵で暗号化しています（[ADR 0002](docs/adr/0002-two-factor-auth.md)）。
 
 構成の判断理由は [docs/adr/0001-architecture.md](docs/adr/0001-architecture.md) にまとめています。
 
@@ -87,9 +99,9 @@ Server Actions は外部から直接呼べる HTTP エンドポイントなの�
 
 ```bash
 npm run typecheck
-npm test            # 55 件：公開範囲・入会フロー・通報と処分・権限境界・画像・レビュー指摘の回帰
+npm test            # 71 件：公開範囲・入会フロー・通報と処分・権限境界・画像・2 段階認証・レビュー指摘の回帰
 TEST_DATABASE_URL=postgres://... npm run test:pg   # 同じテストを実際の PostgreSQL で（本番と同じドライバ）
-npm run build && npm run test:e2e   # 7 件：本番ビルドをブラウザで操作（招待→承認→投稿→停止）
+npm run build && npm run test:e2e   # 8 件：本番ビルドをブラウザで操作（招待→2 段階認証→承認→投稿→停止）
 npm run verify      # 上記すべて
 ```
 
@@ -111,7 +123,7 @@ npm run verify      # 上記すべて
 | F-20 | 通報 | 実装済み | 別々の 3 人で自動非表示 |
 | F-22 | 管理画面 | 実装済み | ダッシュボード・会員管理（停止・復帰・権限・招待枠・招待の系譜）・通報対応・監査ログ |
 | — | 退会 | 実装済み | 投稿を削除 or 匿名化を選択、メールアドレスは即時解放 |
-| F-04 | 2 段階認証 | 未実装 | Should。管理者以上で必須にする想定 |
+| F-04 | 2 段階認証 | **前倒しで実装** | 認証アプリ（TOTP）＋リカバリーコード。管理者以上は必須、一般会員は任意 |
 | F-12, 13, 15, 16, 17, 19, 21 | メンション・動画・グループ・DM・イベント・メール通知・ブロック | 未実装 | Should / Could |
 
 ## 既知の制限

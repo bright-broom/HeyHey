@@ -1,7 +1,7 @@
 import { and, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db, DbOrTx } from "../db/client";
-import { applications, emailTokens, invitations, profiles, rateLimits, sessions, users, type User } from "../db/schema";
+import { applications, emailTokens, invitations, loginChallenges, profiles, sessions, userMfa, users, type User } from "../db/schema";
 import { AppError, invalid } from "../lib/errors";
 import { burnPasswordCheck, hashPassword, PASSWORD_MIN, verifyPassword } from "../lib/password";
 import { REAPPLY_COOLDOWN_DAYS } from "../lib/policy";
@@ -9,7 +9,8 @@ import { hashToken, newToken } from "../lib/tokens";
 import { audit } from "./audit";
 import { appUrl, sendMail } from "./mailer";
 import { notifyAdmins } from "./notifications";
-import { consume, reset } from "./ratelimit";
+import { checkSecondFactor, mfaEnabled } from "./mfa";
+import { consume, isLocked, reset } from "./ratelimit";
 import { checkInvitation } from "./invites";
 
 export const SESSION_TTL_DAYS = 30;
@@ -30,21 +31,26 @@ export async function createSession(db: DbOrTx, userId: string): Promise<{ token
   return { token, expiresAt };
 }
 
-/** Cookie のトークンから会員を引く。期限切れは null。状態（停止など）は毎回 DB の最新値 */
-export async function userFromSession(db: Db, token: string | undefined): Promise<User | null> {
+/**
+ * Cookie のトークンから会員を引く。期限切れは null。状態（停止など）と 2 段階認証の有無は毎回 DB の最新値
+ */
+export async function userFromSession(db: Db, token: string | undefined): Promise<{ user: User; mfa: boolean } | null> {
   if (!token || token.length > 200) return null;
   const rows = await db
-    .select({ user: users })
+    .select({ user: users, mfaEnabledAt: userMfa.enabledAt })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
+    .leftJoin(userMfa, eq(userMfa.userId, users.id))
     .where(and(eq(sessions.tokenHash, hashToken(token)), gt(sessions.expiresAt, new Date())))
     .limit(1);
-  const user = rows[0]?.user ?? null;
+  const row = rows[0];
+  if (!row) return null;
+  const { user } = row;
   // 最終アクセス日時は 1 時間に 1 回だけ更新（週次アクティブ数の集計用）
-  if (user && (!user.lastSeenAt || Date.now() - user.lastSeenAt.getTime() > 60 * 60 * 1000)) {
+  if (!user.lastSeenAt || Date.now() - user.lastSeenAt.getTime() > 60 * 60 * 1000) {
     await db.update(users).set({ lastSeenAt: new Date() }).where(eq(users.id, user.id));
   }
-  return user;
+  return { user, mfa: row.mfaEnabledAt != null };
 }
 
 export async function deleteSession(db: DbOrTx, token: string): Promise<void> {
@@ -59,11 +65,26 @@ export async function deleteUserSessions(db: DbOrTx, userId: string): Promise<vo
 
 const LOGIN_FAIL_LIMIT = 5;
 const LOGIN_WINDOW_SEC = 15 * 60;
+const CHALLENGE_TTL_MIN = 10;
+const CHALLENGE_MAX_ATTEMPTS = 5;
 
-/** ログイン可否の理由。画面ではメッセージを出し分けるが、パスワード誤りとアカウント不在は区別しない */
+type LoginFailure = { ok: false; reason: "invalid" | "rate_limited" | "suspended" | "rejected" | "withdrawn" | "expired" };
+
+/**
+ * ログイン可否の理由。画面ではメッセージを出し分けるが、パスワード誤りとアカウント不在は区別しない。
+ * ok: "mfa" は「パスワードは正しいが 2 段階目が必要」。この時点ではセッションを作らない。
+ */
 export type LoginResult =
-  | { ok: true; user: User; token: string; expiresAt: Date }
-  | { ok: false; reason: "invalid" | "rate_limited" | "suspended" | "rejected" | "withdrawn" };
+  | { ok: true; user: User; mfa: boolean; token: string; expiresAt: Date }
+  | { ok: "mfa"; challenge: string; expiresAt: Date }
+  | LoginFailure;
+
+function statusFailure(user: User): LoginFailure | null {
+  if (user.status === "suspended") return { ok: false, reason: "suspended" };
+  if (user.status === "rejected") return { ok: false, reason: "rejected" };
+  if (user.status === "withdrawn") return { ok: false, reason: "withdrawn" };
+  return null;
+}
 
 export async function login(db: Db, input: { email: string; password: string; ip: string }): Promise<LoginResult> {
   const email = normalizeEmail(input.email);
@@ -79,24 +100,59 @@ export async function login(db: Db, input: { email: string; password: string; ip
     return { ok: false, reason: accountOk && ipOk ? "invalid" : "rate_limited" };
   }
   // 正しいパスワードでも、ロック中なら通さない（総当たりの最後の 1 回を成功させない）
-  const [lock] = await db
-    .select({ count: rateLimits.count })
-    .from(rateLimits)
-    .where(
-      and(
-        eq(rateLimits.key, keyAccount),
-        gt(rateLimits.windowStartedAt, sql`now() - make_interval(secs => ${LOGIN_WINDOW_SEC})`),
-      ),
-    );
-  if (lock && lock.count >= LOGIN_FAIL_LIMIT) return { ok: false, reason: "rate_limited" };
+  if (await isLocked(db, keyAccount, LOGIN_FAIL_LIMIT, LOGIN_WINDOW_SEC)) return { ok: false, reason: "rate_limited" };
 
-  if (user!.status === "suspended") return { ok: false, reason: "suspended" };
-  if (user!.status === "rejected") return { ok: false, reason: "rejected" };
-  if (user!.status === "withdrawn") return { ok: false, reason: "withdrawn" };
+  const blocked = statusFailure(user!);
+  if (blocked) return blocked;
 
   await reset(db, keyAccount);
+  if (await mfaEnabled(db, user!.id)) {
+    await db.delete(loginChallenges).where(and(eq(loginChallenges.userId, user!.id), lt(loginChallenges.expiresAt, new Date())));
+    const challenge = newToken();
+    const expiresAt = new Date(Date.now() + CHALLENGE_TTL_MIN * 60 * 1000);
+    await db.insert(loginChallenges).values({ tokenHash: hashToken(challenge), userId: user!.id, expiresAt });
+    return { ok: "mfa", challenge, expiresAt };
+  }
   const session = await createSession(db, user!.id);
-  return { ok: true, user: user!, ...session };
+  return { ok: true, user: user!, mfa: false, ...session };
+}
+
+/**
+ * ログインの 2 段階目。認証アプリのコードかリカバリーコードで、チャレンジをセッションに換える。
+ * 総当たり対策は 2 重：チャレンジごとに 5 回、アカウントごとに 15 分で 5 回。
+ */
+export async function completeLogin(db: Db, input: { challenge: string; code: string }): Promise<LoginResult> {
+  if (!input.challenge || input.challenge.length > 200) return { ok: false, reason: "expired" };
+  const hash = hashToken(input.challenge);
+  const [ch] = await db
+    .select()
+    .from(loginChallenges)
+    .where(and(eq(loginChallenges.tokenHash, hash), gt(loginChallenges.expiresAt, new Date()), lt(loginChallenges.attempts, CHALLENGE_MAX_ATTEMPTS)))
+    .limit(1);
+  if (!ch) return { ok: false, reason: "expired" };
+
+  const keyAccount = `login:mfa:${ch.userId}`;
+  if (await isLocked(db, keyAccount, LOGIN_FAIL_LIMIT, LOGIN_WINDOW_SEC)) return { ok: false, reason: "rate_limited" };
+
+  const factor = await checkSecondFactor(db, ch.userId, input.code);
+  if (!factor) {
+    await db.update(loginChallenges).set({ attempts: sql`${loginChallenges.attempts} + 1` }).where(eq(loginChallenges.tokenHash, hash));
+    const accountOk = await consume(db, keyAccount, LOGIN_FAIL_LIMIT, LOGIN_WINDOW_SEC);
+    return { ok: false, reason: accountOk ? "invalid" : "rate_limited" };
+  }
+
+  return db.transaction(async (tx) => {
+    // チャレンジは 1 回きり。同時に 2 回通っても、消せた方だけがセッションを得る
+    const [consumed] = await tx.delete(loginChallenges).where(eq(loginChallenges.tokenHash, hash)).returning({ userId: loginChallenges.userId });
+    if (!consumed) return { ok: false, reason: "expired" } as const;
+    // チャレンジ発行後に停止された場合も通さない
+    const [user] = await tx.select().from(users).where(eq(users.id, consumed.userId));
+    const blocked = statusFailure(user!);
+    if (blocked) return blocked;
+    await reset(tx, keyAccount);
+    const session = await createSession(tx, user!.id);
+    return { ok: true, user: user!, mfa: true, ...session } as const;
+  });
 }
 
 // ───────── 登録（招待リンク＋申請フォーム） ─────────

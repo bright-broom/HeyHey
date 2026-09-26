@@ -15,6 +15,13 @@
       "when": 1790430149931,
       "tag": "0001_audit_append_only",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790434961992,
+      "tag": "0002_mfa",
+      "breakpoints": true
     }
   ]
 }

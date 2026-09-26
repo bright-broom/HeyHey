@@ -4,7 +4,7 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getDb } from "../db/client";
 import { isHttps } from "../lib/env";
-import { isAdmin, isMember } from "../lib/policy";
+import { hasAdminRole, isAdmin, isMember } from "../lib/policy";
 import { toViewer, type Viewer } from "../lib/viewer";
 import { userFromSession } from "../services/auth";
 
@@ -30,11 +30,26 @@ export async function clearSessionCookie() {
   (await cookies()).delete(SESSION_COOKIE);
 }
 
+/** パスワードは通ったが 2 段階目がまだのログイン。セッションとは別の Cookie で、10 分で消える */
+const CHALLENGE_COOKIE = SECURE ? "__Host-kakomi_mfa" : "kakomi_mfa";
+
+export async function setChallengeCookie(token: string, expiresAt: Date) {
+  (await cookies()).set(CHALLENGE_COOKIE, token, { httpOnly: true, sameSite: "lax", secure: SECURE, path: "/", expires: expiresAt });
+}
+
+export async function readChallengeToken(): Promise<string | undefined> {
+  return (await cookies()).get(CHALLENGE_COOKIE)?.value;
+}
+
+export async function clearChallengeCookie() {
+  (await cookies()).delete(CHALLENGE_COOKIE);
+}
+
 /** リクエスト中は 1 回だけ DB を引く。状態（停止など）は毎リクエスト最新 */
 export const getViewer = cache(async (): Promise<Viewer | null> => {
   const db = await getDb();
-  const user = await userFromSession(db, await readSessionToken());
-  return user ? toViewer(user) : null;
+  const found = await userFromSession(db, await readSessionToken());
+  return found ? toViewer(found.user, { mfa: found.mfa }) : null;
 });
 
 /** アカウントの状態に応じて、見てよい画面へ振り分ける */
@@ -58,8 +73,10 @@ export async function requireMember(): Promise<Viewer> {
   return v;
 }
 
+/** 管理者以上でも 2 段階認証が未設定なら、管理画面ではなく設定画面へ案内する */
 export async function requireAdmin(): Promise<Viewer> {
   const v = await requireMember();
+  if (hasAdminRole(v) && !v.mfa) redirect("/settings/security?required=1");
   if (!isAdmin(v)) redirect("/");
   return v;
 }

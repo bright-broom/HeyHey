@@ -10,7 +10,7 @@ export default mergeConfig(
   base,
   defineConfig({
     test: {
-      env: { PGLITE_DIR: "", DATABASE_URL: process.env.TEST_DATABASE_URL ?? "" },
+      env: { PGLITE_DIR: "", DATABASE_URL: process.env.TEST_DATABASE_URL ?? "", MFA_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64") },
       fileParallelism: false,
     },
   }),

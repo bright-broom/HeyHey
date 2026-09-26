@@ -146,7 +146,7 @@ describe("ログイン", () => {
     const m = await makeUser(d);
     const res = await login(d, { email: m.user.email.toUpperCase(), password: PASSWORD, ip: "5.5.5.5" });
     expect(res.ok).toBe(true);
-    if (!res.ok) return;
+    if (res.ok !== true) return;
     const rows = await d.select().from(sessions).where(eq(sessions.userId, m.user.id));
     expect(rows.every((r) => r.tokenHash !== res.token)).toBe(true);
   });
