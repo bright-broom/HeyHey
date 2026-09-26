@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
+import { demoLoginEnabled } from "@/server/lib/demo";
 import { getViewer, homeFor } from "@/server/web/session";
+import { DemoAccounts } from "./DemoAccounts";
 import { LoginForm } from "./LoginForm";
 
 export const metadata = { title: "ログイン" };
@@ -31,6 +33,12 @@ export default async function LoginPage(props: PageProps<"/login">) {
         <br />
         招待リンクがなければ登録できません。
       </p>
+      {demoLoginEnabled() && (
+        <>
+          <div className="rule" />
+          <DemoAccounts />
+        </>
+      )}
     </div>
   );
 }

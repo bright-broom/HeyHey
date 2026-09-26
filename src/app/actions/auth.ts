@@ -1,8 +1,10 @@
 "use server";
 
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getDb } from "@/server/db/client";
-import { acceptTerms, changePassword, completeLogin, deleteSession, login, register, resendVerification, verifyEmail } from "@/server/services/auth";
+import { acceptTerms, changePassword, completeLogin, deleteSession, demoLogin, login, register, resendVerification, verifyEmail } from "@/server/services/auth";
+import { demoLoginEnabled } from "@/server/lib/demo";
+import { AppError } from "@/server/lib/errors";
 import { safeLocalPath } from "@/server/lib/redirect";
 import { toViewer } from "@/server/lib/viewer";
 import { attempt, str, type FormState } from "@/server/web/action";
@@ -58,6 +60,25 @@ export async function loginCodeAction(_: FormState, fd: FormData): Promise<FormS
   const safeNext = safeLocalPath(str(fd, "next"));
   const home = homeFor(toViewer(res.user, { mfa: res.mfa }));
   redirect(home === "/" && safeNext ? safeNext : home);
+}
+
+/** デモログイン（ローカル開発専用。サービス側で環境を確かめ、本番では not_found になる） */
+export async function demoLoginAction(fd: FormData) {
+  if (!demoLoginEnabled()) notFound();
+  let res: Awaited<ReturnType<typeof demoLogin>>;
+  try {
+    res = await demoLogin(await getDb(), str(fd, "email"));
+  } catch (e) {
+    if (!(e instanceof AppError)) throw e;
+    await setFlash("error", e.message);
+    redirect("/login");
+  }
+  if (res.ok !== true) {
+    await setFlash("error", res.ok === false ? LOGIN_MESSAGES[res.reason] : "ログインできませんでした。");
+    redirect("/login");
+  }
+  await setSessionCookie(res.token, res.expiresAt);
+  redirect(homeFor(toViewer(res.user, { mfa: res.mfa })));
 }
 
 export async function logoutAction() {

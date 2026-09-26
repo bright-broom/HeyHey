@@ -14,15 +14,28 @@ npm run demo      # DB 作成＋デモ用の会員・投稿・審査待ち・通
 npm run dev       # http://localhost:3000
 ```
 
-デモのログイン情報（パスワードはすべて `demo-password-123`）です。
-オーナーと管理者は 2 段階認証が有効なので、認証アプリ（Google Authenticator・1Password など）に鍵 `KAKOMIDEMOKAKOMIDEMOKAKOMIDEMO23` を手入力で登録しておきます（デモ専用の鍵）。
+デモアカウントは、権限と状態の組み合わせごとに 12 人います（台帳は `src/server/lib/demo.ts`）。
+ローカルの開発サーバーでは、ログイン画面の「デモアカウント」から 1 クリックで入れます（パスワードと 2 段階認証を省略）。
+この 1 クリックログインは、ローカルの PGlite で開発しているときだけ動きます（production ビルド・Vercel・`DATABASE_URL` あり・https のどれかに当てはまれば、画面にも出ず使えません）。
+パスワードで入るときは、すべて `demo-password-123` です。
+2 段階認証が有効な人は、認証アプリに鍵 `KAKOMIDEMOKAKOMIDEMOKAKOMIDEMO23` を手入力で登録するとコードが出ます（デモ専用の鍵）。
 
-| メール | 役割 | 試せること |
-| --- | --- | --- |
-| owner@example.com | オーナー | 全管理機能、管理者の任命 |
-| admin@example.com | 管理者 | 入会審査（山田さんが 72 時間超過で待機中）、通報対応 |
-| sato@example.com | 会員 | 投稿、招待リンク発行、友達のみ投稿の閲覧 |
-| suzuki@example.com | 会員 | 田中さんの「友達のみ」投稿が見えないことの確認 |
+| 区分 | メール | 状態 | 試せること |
+| --- | --- | --- | --- |
+| オーナー | owner@example.com | 2 段階認証 有効 | すべての管理機能、管理者の任命、管理者への処分 |
+| 管理者 | admin@example.com | 2 段階認証 有効 | 入会審査（72 時間超過の申請あり）、通報対応、監査ログ |
+| 管理者 | admin-new@example.com | 2 段階認証 未設定 | 管理画面に入れず設定へ案内される（`npm run mfa:ticket -- admin-new@example.com` でチケット） |
+| 会員 | sato@example.com | — | 投稿・画像・招待リンク、田中さんの「友達のみ」投稿が見える |
+| 会員 | tanaka@example.com | — | 「友達のみ」の投稿者。友達・通知・リアクション |
+| 会員 | suzuki@example.com | — | 田中さんの「友達のみ」投稿が見えない。通報された投稿の投稿者 |
+| 会員 | takahashi@example.com | 2 段階認証 有効 | 任意の 2 段階認証。リカバリーコードの再発行と無効化 |
+| 会員 | ito@example.com | 規約 未同意 | 同意するまで中身が見えない |
+| 申請者 | yamada@example.com | 審査待ち | 申請状況だけが見える |
+| 申請者 | kobayashi@example.com | メール確認待ち | 確認メールの再送 |
+| 入れない人 | nakamura@example.com | 利用停止 | ログインを拒否される |
+| 入れない人 | watanabe@example.com | 却下 | ログインを拒否される |
+
+`npm run demo` は何度流しても大丈夫です（足りないアカウントだけを追加します）。
 
 招待から入会までを試すときは、会員でログインして「招待」からリンクを発行し、別のブラウザ（シークレットウィンドウ）で開きます。
 メール送信サービスを設定していない間は、送ったメールを http://localhost:3000/dev/mail で確認できます。
@@ -102,7 +115,7 @@ Server Actions は外部から直接呼べる HTTP エンドポイントなの�
 
 ```bash
 npm run typecheck
-npm test            # 75 件：公開範囲・入会フロー・通報と処分・権限境界・画像・2 段階認証・レビュー指摘の回帰
+npm test            # 84 件：公開範囲・入会フロー・通報と処分・権限境界・画像・2 段階認証・デモログインの封じ込め・レビュー指摘の回帰
 TEST_DATABASE_URL=postgres://... npm run test:pg   # 同じテストを実際の PostgreSQL で（本番と同じドライバ）
 npm run build && npm run test:e2e   # 8 件：本番ビルドをブラウザで操作（招待→2 段階認証→承認→投稿→停止）
 npm run verify      # 上記すべて

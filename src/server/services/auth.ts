@@ -2,7 +2,8 @@ import { and, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db, DbOrTx } from "../db/client";
 import { applications, emailTokens, invitations, loginChallenges, profiles, sessions, userMfa, users, type User } from "../db/schema";
-import { AppError, invalid } from "../lib/errors";
+import { demoLoginEnabled, isDemoEmail } from "../lib/demo";
+import { AppError, invalid, notFound } from "../lib/errors";
 import { burnPasswordCheck, hashPassword, PASSWORD_MIN, verifyPassword } from "../lib/password";
 import { REAPPLY_COOLDOWN_DAYS } from "../lib/policy";
 import { hashToken, newToken } from "../lib/tokens";
@@ -150,6 +151,23 @@ export async function completeLogin(db: Db, input: { challenge: string; code: st
     const session = await createSession(tx, user!.id);
     return { ok: true, user: user!, mfa: true, ...session } as const;
   });
+}
+
+/**
+ * デモログイン（ローカル開発専用）。台帳（lib/demo）にあるアカウントだけ、パスワードと 2 段階認証を省いて入る。
+ * 状態のルール（停止・却下は入れない）は通常のログインと同じ。管理権限は、そのアカウントが
+ * 2 段階認証を設定済みかどうかで決まる（userFromSession が毎回読む）ので、ここで特別扱いはしない。
+ */
+export async function demoLogin(db: Db, emailRaw: string): Promise<LoginResult> {
+  if (!demoLoginEnabled()) throw notFound();
+  const email = normalizeEmail(emailRaw);
+  if (!isDemoEmail(email)) throw notFound();
+  const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  if (!user) throw notFound("このデモアカウントはまだありません。npm run demo を実行してください。");
+  const blocked = statusFailure(user);
+  if (blocked) return blocked;
+  const session = await createSession(db, user.id);
+  return { ok: true, user, mfa: await mfaEnabled(db, user.id), ...session };
 }
 
 // ───────── 登録（招待リンク＋申請フォーム） ─────────
