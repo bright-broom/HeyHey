@@ -1,3 +1,4 @@
+import { PageTitle } from "@/components/PageTitle";
 import Link from "next/link";
 import { friendAction } from "@/app/actions/social";
 import { Avatar } from "@/components/Avatar";
@@ -11,10 +12,10 @@ type Person = { id: string; displayName: string; affiliation: string | null; ava
 
 function Row({ p, children }: { p: Person; children?: React.ReactNode }) {
   return (
-    <li className="flex items-center gap-3 p-3">
+    <li className="flex items-center gap-4 py-4">
       <Avatar name={p.displayName} mediaId={p.avatarMediaId} />
       <Link href={`/u/${p.id}`} className="min-w-0 flex-1">
-        <p className="truncate font-semibold hover:underline">{p.displayName}</p>
+        <p className="truncate font-medium hover:underline hover:underline-offset-4">{p.displayName}</p>
         <p className="truncate text-xs text-muted">{p.affiliation || "所属未設定"}</p>
       </Link>
       {children}
@@ -27,7 +28,7 @@ function Op({ userId, op, label, primary }: { userId: string; op: string; label:
     <form action={friendAction}>
       <input type="hidden" name="userId" value={userId} />
       <input type="hidden" name="op" value={op} />
-      <button className={primary ? "btn-primary py-1.5" : "btn-ghost py-1.5"}>{label}</button>
+      <button className={primary ? "btn-primary py-2" : "btn-ghost py-2"}>{label}</button>
     </form>
   );
 }
@@ -36,13 +37,12 @@ export default async function FriendsPage() {
   const viewer = await requireMember();
   const { friends, incoming, outgoing } = await listFriends(await getDb(), viewer);
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <h1 className="h1">友達</h1>
-      <p className="text-sm text-muted">「友達のみ」で公開された投稿は、ここにいる友達だけが見られます。</p>
+    <div className="max-w-3xl space-y-12">
+      <PageTitle plaque="FRIENDS" title="友達" lead="「友達のみ」で公開された投稿は、ここにいる友達だけが見られます。" />
       {incoming.length > 0 && (
-        <section className="space-y-2">
+        <section className="space-y-3">
           <h2 className="h2">届いている申請（{incoming.length}）</h2>
-          <ul className="card divide-y divide-line">
+          <ul className="divide-y divide-line border-y border-line">
             {incoming.map((p) => (
               <Row key={p.id} p={p}>
                 <Op userId={p.id} op="accept" label="承認" primary />
@@ -52,24 +52,24 @@ export default async function FriendsPage() {
           </ul>
         </section>
       )}
-      <section className="space-y-2">
+      <section className="space-y-3">
         <h2 className="h2">友達（{friends.length}）</h2>
         {friends.length ? (
-          <ul className="card divide-y divide-line">
+          <ul className="divide-y divide-line border-y border-line">
             {friends.map((p) => (
               <Row key={p.id} p={p} />
             ))}
           </ul>
         ) : (
-          <p className="card p-6 text-center text-sm text-muted">
+          <p className="border-y border-line py-10 text-center text-sm text-muted">
             まだ友達がいません。<Link href="/members" className="btn-link">メンバー一覧</Link>から申請できます。
           </p>
         )}
       </section>
       {outgoing.length > 0 && (
-        <section className="space-y-2">
+        <section className="space-y-3">
           <h2 className="h2">申請中（{outgoing.length}）</h2>
-          <ul className="card divide-y divide-line">
+          <ul className="divide-y divide-line border-y border-line">
             {outgoing.map((p) => (
               <Row key={p.id} p={p}>
                 <Op userId={p.id} op="remove" label="取り消す" />

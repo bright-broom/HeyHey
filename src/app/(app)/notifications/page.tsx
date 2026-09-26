@@ -1,3 +1,4 @@
+import { PageTitle } from "@/components/PageTitle";
 import Link from "next/link";
 import { markAllReadAction } from "@/app/actions/social";
 import { timeAgo } from "@/components/time";
@@ -44,32 +45,31 @@ export default async function NotificationsPage() {
   const admin = isAdmin(viewer);
   const hasUnread = items.some((n) => !n.readAt);
   return (
-    <div className="mx-auto max-w-2xl space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="h1">通知</h1>
+    <div className="max-w-3xl">
+      <PageTitle plaque="NOTICE" title="通知">
         {hasUnread && (
           <form action={markAllReadAction}>
-            <button className="btn-ghost py-1.5">すべて既読にする</button>
+            <button className="btn-ghost">すべて既読にする</button>
           </form>
         )}
-      </div>
-      <ul className="card divide-y divide-line">
+      </PageTitle>
+      <ul className="divide-y divide-line border-b border-line">
         {items
           .filter((n) => admin || !["application_submitted", "report_submitted"].includes(n.type))
           .map((n) => {
             const { text, href } = describe(n);
             const body = (
-              <div className="flex items-start gap-3 p-3">
-                <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${n.readAt ? "bg-transparent" : "bg-brand"}`} aria-label={n.readAt ? undefined : "未読"} />
+              <div className="flex items-start gap-4 py-5">
+                <span className={`mt-2 h-1.5 w-1.5 shrink-0 rounded-full ${n.readAt ? "bg-transparent" : "bg-ink"}`} aria-label={n.readAt ? undefined : "未読"} />
                 <div className="min-w-0 flex-1">
                   <p className={`text-sm ${n.readAt ? "text-muted" : "font-medium"}`}>{text}</p>
-                  <p className="text-xs text-muted">{timeAgo(n.createdAt)}</p>
+                  <p className="mt-1 text-[11px] tracking-[0.06em] text-muted">{timeAgo(n.createdAt)}</p>
                 </div>
               </div>
             );
-            return <li key={n.id}>{href ? <Link href={href} className="block hover:bg-canvas">{body}</Link> : body}</li>;
+            return <li key={n.id}>{href ? <Link href={href} className="block transition-colors hover:bg-light/70">{body}</Link> : body}</li>;
           })}
-        {items.length === 0 && <li className="p-6 text-center text-sm text-muted">通知はありません。</li>}
+        {items.length === 0 && <li className="py-16 text-center text-sm text-muted">いまは、静かです。</li>}
       </ul>
     </div>
   );

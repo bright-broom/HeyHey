@@ -8,10 +8,10 @@ export const STATUS_LABEL: Record<string, string> = {
 };
 export const ROLE_LABEL: Record<string, string> = { member: "一般", admin: "管理者", owner: "オーナー" };
 export const STATUS_BADGE: Record<string, string> = {
-  unverified: "bg-canvas text-muted",
-  pending: "bg-warn-soft text-warn",
-  active: "bg-ok-soft text-ok",
-  suspended: "bg-danger-soft text-danger",
-  rejected: "bg-canvas text-muted",
-  withdrawn: "bg-canvas text-muted",
+  unverified: "text-muted",
+  pending: "text-warn",
+  active: "text-ok",
+  suspended: "text-danger",
+  rejected: "text-muted",
+  withdrawn: "text-muted",
 };

@@ -1,12 +1,13 @@
 import Link from "next/link";
+import { eq } from "drizzle-orm";
 import { logoutAction } from "@/app/actions/auth";
 import { Avatar } from "@/components/Avatar";
 import { FlashToast } from "@/components/Flash";
+import { NavLinks } from "@/components/NavLinks";
 import { getDb } from "@/server/db/client";
+import { profiles } from "@/server/db/schema";
 import { isAdmin } from "@/server/lib/policy";
 import { unreadCount } from "@/server/services/notifications";
-import { profiles } from "@/server/db/schema";
-import { eq } from "drizzle-orm";
 import { readFlash } from "@/server/web/flash";
 import { requireMember } from "@/server/web/session";
 
@@ -27,48 +28,49 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   ];
   return (
     <div className="min-h-dvh">
-      <header className="sticky top-0 z-20 border-b border-line bg-card/95 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-2.5">
-          <Link href="/" className="text-lg font-extrabold tracking-tight text-brand">
-            Kakomi
+      <header className="sticky top-0 z-20 border-b border-line bg-canvas/90 backdrop-blur-sm">
+        <div className="mx-auto flex max-w-6xl items-center gap-10 px-5 sm:px-8">
+          <Link href="/" className="py-5 text-[12px] font-medium tracking-[0.42em]">
+            KAKOMI
           </Link>
-          <form action="/members" className="hidden flex-1 sm:block">
-            <input name="q" placeholder="メンバーを検索" className="input max-w-xs py-1.5 text-sm" aria-label="メンバーを検索" />
-          </form>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="hidden md:block">
+            <NavLinks items={nav} label="メインメニュー" />
+          </div>
+          <div className="ml-auto flex items-center gap-5">
+            <form action="/members" className="hidden lg:block" role="search">
+              <input
+                name="q"
+                placeholder="メンバーを探す"
+                className="w-44 border-0 border-b border-line-strong bg-transparent px-0 py-1.5 text-sm outline-none transition-colors placeholder:text-muted focus:border-ink"
+                aria-label="メンバーを検索"
+              />
+            </form>
             {isAdmin(viewer) && (
-              <Link href="/admin" className="badge bg-ink text-white">
-                管理
+              <Link href="/admin" className="plaque hover:text-ink">
+                ADMIN
               </Link>
             )}
             <details className="relative">
-              <summary className="flex cursor-pointer list-none items-center gap-2 rounded-full p-0.5 hover:bg-canvas" aria-label="アカウントメニュー">
+              <summary className="flex cursor-pointer list-none items-center rounded-full" aria-label="アカウントメニュー">
                 <Avatar name={viewer.displayName} mediaId={profile?.avatarMediaId} size={32} />
               </summary>
-              <div className="absolute right-0 mt-2 w-48 rounded-lg border border-line bg-card p-1 text-sm shadow-lg">
-                <Link href={`/u/${viewer.id}`} className="block rounded px-3 py-2 hover:bg-canvas">プロフィール</Link>
-                <Link href="/settings" className="block rounded px-3 py-2 hover:bg-canvas">設定</Link>
+              <div className="fade-in absolute right-0 mt-3 w-52 border border-line bg-light py-2 text-sm shadow-lg">
+                <p className="truncate px-4 pb-2 pt-1 text-xs text-muted">{viewer.displayName}</p>
+                <div className="rule" />
+                <Link href={`/u/${viewer.id}`} className="block px-4 py-2.5 hover:bg-canvas">プロフィール</Link>
+                <Link href="/settings" className="block px-4 py-2.5 hover:bg-canvas">設定</Link>
                 <form action={logoutAction}>
-                  <button className="w-full rounded px-3 py-2 text-left hover:bg-canvas">ログアウト</button>
+                  <button className="w-full px-4 py-2.5 text-left text-muted hover:bg-canvas hover:text-ink">ログアウト</button>
                 </form>
               </div>
             </details>
           </div>
         </div>
-        <nav className="mx-auto flex max-w-5xl gap-1 overflow-x-auto px-2 pb-1" aria-label="メインメニュー">
-          {nav.map((n) => (
-            <Link key={n.href} href={n.href} className="relative whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium text-muted hover:bg-canvas hover:text-ink">
-              {n.label}
-              {n.badge ? (
-                <span className="ml-1 rounded-full bg-danger px-1.5 text-[11px] font-bold text-white" data-testid="unread">
-                  {n.badge > 99 ? "99+" : n.badge}
-                </span>
-              ) : null}
-            </Link>
-          ))}
-        </nav>
+        <div className="mx-auto max-w-6xl px-5 sm:px-8 md:hidden">
+          <NavLinks items={nav} label="メインメニュー" />
+        </div>
       </header>
-      <main className="mx-auto max-w-5xl px-4 py-6">{children}</main>
+      <main className="mx-auto max-w-6xl px-5 py-10 sm:px-8 lg:py-14">{children}</main>
       <FlashToast flash={await readFlash()} />
     </div>
   );

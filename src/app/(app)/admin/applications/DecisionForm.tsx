@@ -20,7 +20,7 @@ export function DecisionForm({ applicationId }: { applicationId: string }) {
     <form action={action} className="space-y-3">
       <input type="hidden" name="applicationId" value={applicationId} />
       <input type="hidden" name="kind" value={mode} />
-      <div role="radiogroup" aria-label="判断" className="flex gap-1">
+      <div role="radiogroup" aria-label="判断" className="grid w-full grid-cols-3 border border-line-strong">
         {(
           [
             ["approve", "承認"],
@@ -34,7 +34,7 @@ export function DecisionForm({ applicationId }: { applicationId: string }) {
             role="radio"
             aria-checked={mode === k}
             onClick={() => setMode(k)}
-            className={`rounded-md border px-3 py-1 text-sm font-medium ${mode === k ? "border-brand bg-brand-soft text-brand" : "border-line text-muted"}`}
+            className={`px-4 py-2 text-xs tracking-[0.08em] transition-colors duration-200 ${mode === k ? "bg-ink text-light" : "text-muted hover:text-ink"}`}
           >
             {l}
           </button>
@@ -50,7 +50,7 @@ export function DecisionForm({ applicationId }: { applicationId: string }) {
       )}
       {mode !== "approve" && <textarea name="note" rows={2} maxLength={500} placeholder={mode === "hold" ? "保留の理由（管理者間のメモ）" : "補足（任意・本人に伝わります）"} className="input text-sm" />}
       <FormMessage state={state} />
-      <SubmitButton className={mode === "reject" ? "btn-danger" : "btn-primary"}>
+      <SubmitButton className={mode === "reject" ? "btn-danger w-full" : "btn-primary w-full"}>
         {mode === "approve" ? "承認する" : mode === "reject" ? "却下する" : "保留にする"}
       </SubmitButton>
     </form>

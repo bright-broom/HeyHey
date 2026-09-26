@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PostCard } from "@/components/PostCard";
 import { getDb } from "@/server/db/client";
@@ -13,8 +14,11 @@ export default async function PostPage(props: PageProps<"/posts/[id]">) {
   // 見えない投稿は「存在しない」と同じ扱い（公開範囲の外にあることも明かさない）
   if (!post) notFound();
   return (
-    <div className="mx-auto max-w-2xl">
-      <PostCard post={post} mode="detail" />
+    <div className="max-w-[640px]">
+      <Link href="/" className="plaque hover:text-ink">← FEED</Link>
+      <div className="mt-6">
+        <PostCard post={post} mode="detail" />
+      </div>
     </div>
   );
 }

@@ -22,7 +22,7 @@ export default async function DevMailPage() {
       {mails.map((m) => (
         <article key={m.id} className="card space-y-1 p-4 text-sm" data-testid="mail" data-to={m.to}>
           <div className="text-xs text-muted">{formatDateTime(m.createdAt)} ・ 宛先 {m.to}</div>
-          <h2 className="font-bold">{m.subject}</h2>
+          <h2 className="font-medium">{m.subject}</h2>
           <pre className="whitespace-pre-wrap break-all font-sans">{m.body}</pre>
         </article>
       ))}

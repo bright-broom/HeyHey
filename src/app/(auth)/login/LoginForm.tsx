@@ -8,7 +8,7 @@ import { SubmitButton } from "@/components/SubmitButton";
 export function LoginForm({ next }: { next?: string }) {
   const [state, action] = useActionState(loginAction, undefined);
   return (
-    <form action={action} className="space-y-4">
+    <form action={action} className="space-y-6">
       {next && <input type="hidden" name="next" value={next} />}
       <div>
         <label htmlFor="email" className="label">メールアドレス</label>

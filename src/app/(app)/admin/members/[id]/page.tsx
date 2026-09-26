@@ -37,12 +37,12 @@ export default async function AdminMemberPage(props: PageProps<"/admin/members/[
             {[...chain].reverse().map((c, i) => (
               <li key={c.id} className="flex items-center gap-1">
                 {i > 0 && <span className="text-muted">→</span>}
-                <Link href={`/admin/members/${c.id}`} className={c.id === u.id ? "font-bold" : "btn-link"}>{c.displayName}</Link>
+                <Link href={`/admin/members/${c.id}`} className={c.id === u.id ? "font-medium" : "btn-link"}>{c.displayName}</Link>
                 {c.status !== "active" && <span className={`badge ${STATUS_BADGE[c.status]}`}>{STATUS_LABEL[c.status]}</span>}
               </li>
             ))}
           </ol>
-          <h3 className="mt-3 text-sm font-semibold">この人が招待した人（{invitees.length}）</h3>
+          <h3 className="mt-3 text-sm font-medium">この人が招待した人（{invitees.length}）</h3>
           <ul className="mt-1 flex flex-wrap gap-2 text-sm">
             {invitees.map((c) => (
               <li key={c.id}>

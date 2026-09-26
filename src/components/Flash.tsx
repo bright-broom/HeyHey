@@ -16,11 +16,11 @@ export function FlashToast({ flash }: { flash: Flash | null }) {
   }, [flash]);
   if (!shown) return null;
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4">
+    <div className="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center px-4">
       <div
         role={shown.kind === "error" ? "alert" : "status"}
-        className={`pointer-events-auto rounded-lg px-4 py-2.5 text-sm font-medium shadow-lg ${
-          shown.kind === "error" ? "bg-danger text-white" : "bg-ink text-white"
+        className={`fade-in pointer-events-auto px-5 py-3 text-sm tracking-[0.04em] shadow-lg ${
+          shown.kind === "error" ? "bg-danger text-light" : "bg-ink text-light"
         }`}
       >
         {shown.message}

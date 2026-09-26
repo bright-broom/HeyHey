@@ -10,10 +10,10 @@ export function RegisterForm({ token }: { token: string }) {
   const [state, action] = useActionState(registerAction, undefined);
   const f = state?.fields ?? {};
   return (
-    <form action={action} className="space-y-4">
+    <form action={action} className="space-y-8">
       <input type="hidden" name="token" value={token} />
-      <fieldset className="space-y-3">
-        <legend className="h2 mb-2">アカウント</legend>
+      <fieldset className="space-y-5">
+        <legend className="plaque mb-4">01 — アカウント</legend>
         <div>
           <label htmlFor="email" className="label">メールアドレス</label>
           <input id="email" name="email" type="email" autoComplete="email" required defaultValue={f.email} className="input" />
@@ -37,8 +37,9 @@ export function RegisterForm({ token }: { token: string }) {
         </div>
       </fieldset>
 
-      <fieldset className="space-y-3 border-t border-line pt-4">
-        <legend className="h2 mb-2">入会申請（管理者だけが見ます）</legend>
+      <div className="rule" />
+      <fieldset className="space-y-5">
+        <legend className="plaque mb-4">02 — 申請内容（管理者だけが見ます）</legend>
         <div>
           <label htmlFor="fullName" className="label">氏名</label>
           <input id="fullName" name="fullName" maxLength={80} required defaultValue={f.fullName} className="input" />

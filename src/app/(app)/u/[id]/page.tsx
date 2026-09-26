@@ -51,38 +51,42 @@ export default async function ProfilePage(props: PageProps<"/u/[id]">) {
   if (!profile) notFound();
   const { posts } = await listFeed(db, viewer, { authorId: profile.id });
   return (
-    <div className="mx-auto max-w-2xl space-y-4">
-      <section className="card p-5">
-        <div className="flex flex-wrap items-start gap-4">
-          <Avatar name={profile.displayName} mediaId={profile.avatarMediaId} size={80} />
-          <div className="min-w-0 flex-1">
-            <h1 className="h1">{profile.displayName}</h1>
-            {profile.affiliation && <p className="text-sm text-muted">{profile.affiliation}</p>}
-            <p className="mt-1 text-xs text-muted">友達 {profile.friendCount} 人</p>
-          </div>
-          <div className="flex items-center gap-2">
-            {profile.relationship === "self" ? (
-              <Link href="/settings" className="btn-ghost">プロフィールを編集</Link>
-            ) : (
-              <FriendButton userId={profile.id} rel={profile.relationship} />
-            )}
-          </div>
+    <div className="grid gap-14 lg:grid-cols-[240px_minmax(0,640px)] lg:gap-20">
+      <section className="lg:sticky lg:top-28 lg:self-start">
+        <p className="plaque">MEMBER</p>
+        <div className="mt-6">
+          <Avatar name={profile.displayName} mediaId={profile.avatarMediaId} size={112} />
         </div>
-        {profile.bio && <p className="mt-4 whitespace-pre-wrap break-words text-sm leading-relaxed">{profile.bio}</p>}
+        <h1 className="h1 mt-6 break-words">{profile.displayName}</h1>
+        {profile.affiliation && <p className="mt-2 text-sm text-muted">{profile.affiliation}</p>}
+        {profile.bio && <p className="mt-6 whitespace-pre-wrap break-words border-t border-line pt-6 text-sm leading-[1.95]">{profile.bio}</p>}
+        <dl className="mt-6 border-t border-line pt-6">
+          <dt className="plaque">FRIENDS</dt>
+          <dd className="mt-1.5 text-2xl font-light tabular-nums">{profile.friendCount}</dd>
+        </dl>
+        <div className="mt-8">
+          {profile.relationship === "self" ? (
+            <Link href="/settings" className="btn-ghost">プロフィールを編集</Link>
+          ) : (
+            <FriendButton userId={profile.id} rel={profile.relationship} />
+          )}
+        </div>
         {profile.relationship !== "self" && (
-          <details className="mt-4 text-xs text-muted">
-            <summary className="cursor-pointer list-none hover:underline">このメンバーを通報</summary>
-            <div className="mt-2 max-w-xs">
+          <details className="mt-8 text-xs text-muted">
+            <summary className="cursor-pointer list-none tracking-[0.08em] hover:text-ink">このメンバーを通報</summary>
+            <div className="mt-3 border border-line bg-light p-4">
               <ReportForm targetType="user" targetId={profile.id} />
             </div>
           </details>
         )}
       </section>
-      <h2 className="h2 px-1">投稿</h2>
-      {posts.length === 0 && <p className="card p-6 text-center text-sm text-muted">表示できる投稿はありません。</p>}
-      {posts.map((p) => (
-        <PostCard key={p.id} post={p} />
-      ))}
+      <section aria-label="投稿">
+        <p className="plaque pb-6">POSTS</p>
+        {posts.length === 0 && <p className="border-t border-line py-16 text-center text-sm text-muted">表示できる投稿はありません。</p>}
+        {posts.map((p) => (
+          <PostCard key={p.id} post={p} />
+        ))}
+      </section>
     </div>
   );
 }

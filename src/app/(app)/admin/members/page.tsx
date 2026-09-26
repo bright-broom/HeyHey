@@ -1,3 +1,4 @@
+import { PageTitle } from "@/components/PageTitle";
 import Link from "next/link";
 import { ROLE_LABEL, STATUS_BADGE, STATUS_LABEL } from "@/components/labels";
 import { formatDateTime } from "@/components/time";
@@ -17,7 +18,7 @@ export default async function AdminMembersPage(props: PageProps<"/admin/members"
   const rows = await listUsers(await getDb(), viewer, { q, status });
   return (
     <div className="space-y-4">
-      <h1 className="h1">会員管理</h1>
+      <PageTitle bare plaque="MEMBERS" title="会員管理" />
       <form className="flex flex-wrap gap-2">
         <input name="q" defaultValue={q} placeholder="名前・メールで検索" className="input w-60" aria-label="名前・メールで検索" />
         <select name="status" defaultValue={status} className="input w-auto" aria-label="状態">
@@ -43,7 +44,7 @@ export default async function AdminMembersPage(props: PageProps<"/admin/members"
             {rows.map((u) => (
               <tr key={u.id} className="hover:bg-canvas/60">
                 <td className="px-3 py-2">
-                  <Link href={`/admin/members/${u.id}`} className="font-semibold hover:underline">{u.displayName}</Link>
+                  <Link href={`/admin/members/${u.id}`} className="font-medium hover:underline">{u.displayName}</Link>
                   <div className="text-xs text-muted">{u.email}</div>
                 </td>
                 <td className="px-3 py-2"><span className={`badge ${STATUS_BADGE[u.status]}`}>{STATUS_LABEL[u.status]}</span></td>

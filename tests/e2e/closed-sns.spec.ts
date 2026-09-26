@@ -127,7 +127,8 @@ test("オーナーが承認すると、規約同意の後にフィードが見�
 test("「友達のみ」の投稿は友達以外に見えない。コメントは通知される", async () => {
   const p = newbiePage;
   await p.getByLabel("本文").fill("友達だけに話したいこと");
-  await p.getByLabel("公開範囲").selectOption("friends");
+  await p.getByRole("form", { name: "投稿する" }).getByText("友達のみ", { exact: true }).click();
+  await expect(p.getByRole("radio", { name: "友達のみ" })).toBeChecked();
   await p.getByRole("button", { name: "投稿する" }).click();
   const secret = p.getByTestId("post").filter({ hasText: "友達だけに話したいこと" });
   await expect(secret).toBeVisible();
@@ -141,7 +142,7 @@ test("「友達のみ」の投稿は友達以外に見えない。コメント�
   // 新人がオーナーの投稿にコメント → オーナーに通知
   await p.goto("/");
   const post = p.getByTestId("post").filter({ hasText: "オーナーからのお知らせ" });
-  await post.getByPlaceholder("コメントを書く…").fill("よろしくお願いします！");
+  await post.getByRole("textbox", { name: "コメントを書く" }).fill("よろしくお願いします！");
   await post.getByRole("button", { name: "送信" }).click();
   await expect(post.getByText("よろしくお願いします！")).toBeVisible();
   await ownerPage.goto("/notifications");

@@ -3,7 +3,7 @@ export const metadata = { title: "利用規約" };
 /** 雛形。公開前に運営者の実情に合わせて見直し、必要に応じて専門家の確認を受けること */
 export function TermsBody() {
   return (
-    <div className="space-y-3 leading-relaxed [&_h2]:mt-4 [&_h2]:font-bold [&_ol]:list-decimal [&_ol]:space-y-1 [&_ol]:pl-5">
+    <div className="space-y-3 leading-loose [&_h2]:mt-8 [&_h2]:text-xs [&_h2]:font-medium [&_h2]:tracking-[0.12em] [&_ol]:list-decimal [&_ol]:space-y-1 [&_ol]:pl-5">
       <p>この規約は、招待制コミュニティ「Kakomi」（以下「本コミュニティ」）の利用条件を定めるものです。</p>
       <h2>第 1 条（参加資格）</h2>
       <ol>

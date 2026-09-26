@@ -3,7 +3,7 @@ export const metadata = { title: "プライバシーポリシー" };
 /** 雛形。個人情報保護法に沿って、運営者名・問い合わせ窓口・委託先などを実情に合わせて埋めること */
 export default function PrivacyPage() {
   return (
-    <div className="card space-y-3 p-6 text-sm leading-relaxed [&_h2]:mt-4 [&_h2]:font-bold [&_ul]:list-disc [&_ul]:space-y-1 [&_ul]:pl-5">
+    <div className="card space-y-3 p-6 text-sm leading-loose [&_h2]:mt-8 [&_h2]:text-xs [&_h2]:font-medium [&_h2]:tracking-[0.12em] [&_ul]:list-disc [&_ul]:space-y-1 [&_ul]:pl-5">
       <h1 className="h1">プライバシーポリシー</h1>
       <h2>1. 取得する情報</h2>
       <ul>

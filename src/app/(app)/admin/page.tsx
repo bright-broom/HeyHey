@@ -1,3 +1,4 @@
+import { PageTitle } from "@/components/PageTitle";
 import Link from "next/link";
 import { formatDateTime } from "@/components/time";
 import { getDb } from "@/server/db/client";
@@ -7,15 +8,16 @@ import { requireAdmin } from "@/server/web/session";
 
 export const metadata = { title: "管理" };
 
+/** 数字は銘板のように、細く大きく。上の線が墨なら通常、煉瓦色なら要対応 */
 function Stat({ label, value, sub, href, alert }: { label: string; value: string | number; sub?: string; href?: string; alert?: boolean }) {
   const body = (
-    <div className={`card h-full p-4 ${alert ? "border-danger/40 bg-danger-soft" : ""}`}>
-      <p className="text-xs font-semibold text-muted">{label}</p>
-      <p className={`mt-1 text-2xl font-bold tabular-nums ${alert ? "text-danger" : ""}`}>{value}</p>
-      {sub && <p className="mt-1 text-xs text-muted">{sub}</p>}
+    <div className={`h-full border-t pt-4 ${alert ? "border-danger" : "border-ink"}`}>
+      <p className={`text-xs tracking-[0.08em] ${alert ? "text-danger" : "text-muted"}`}>{label}</p>
+      <p className={`mt-4 text-4xl font-light tabular-nums tracking-tight ${alert ? "text-danger" : ""}`}>{value}</p>
+      {sub && <p className="mt-2 text-xs leading-relaxed text-muted">{sub}</p>}
     </div>
   );
-  return href ? <Link href={href} className="block hover:opacity-90">{body}</Link> : body;
+  return href ? <Link href={href} className="block transition-opacity hover:opacity-70">{body}</Link> : body;
 }
 
 export default async function AdminHome() {
@@ -24,9 +26,9 @@ export default async function AdminHome() {
   const oldestHours = s.oldestPendingAt ? (Date.now() - s.oldestPendingAt.getTime()) / 3600_000 : 0;
   const overdue = oldestHours > REVIEW_SLA_HOURS;
   return (
-    <div className="space-y-4">
-      <h1 className="h1">ダッシュボード</h1>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+    <div>
+      <PageTitle bare plaque="OVERVIEW" title="ダッシュボード" />
+      <div className="grid grid-cols-2 gap-x-8 gap-y-12 md:grid-cols-4">
         <Stat
           label="審査待ち"
           value={s.pendingApplications}
@@ -34,7 +36,7 @@ export default async function AdminHome() {
           href="/admin/applications"
           alert={overdue}
         />
-        <Stat label="平均審査時間（30 日）" value={s.avgReviewHours == null ? "—" : `${s.avgReviewHours.toFixed(1)} 時間`} />
+        <Stat label="平均審査時間（30 日）" value={s.avgReviewHours == null ? "—" : `${s.avgReviewHours.toFixed(1)}h`} />
         <Stat label="未処理の通報" value={s.openReports} href="/admin/reports" alert={s.openReports > 0} />
         <Stat label="会員数" value={s.activeMembers} href="/admin/members" />
         <Stat label="週次アクティブ会員" value={s.weeklyActiveMembers} sub={s.activeMembers ? `${Math.round((s.weeklyActiveMembers / s.activeMembers) * 100)}%` : undefined} />

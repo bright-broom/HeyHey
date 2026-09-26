@@ -6,34 +6,42 @@ import { CommentForm } from "./CommentForm";
 import { ReportForm } from "./ReportForm";
 import { timeAgo } from "./time";
 
-function AuthorName({ author }: { author: PostDTO["author"] }) {
+function AuthorName({ author, className = "" }: { author: PostDTO["author"]; className?: string }) {
   return author.id ? (
-    <Link href={`/u/${author.id}`} className="font-semibold hover:underline">
+    <Link href={`/u/${author.id}`} className={`font-medium hover:underline hover:underline-offset-4 ${className}`}>
       {author.displayName}
     </Link>
   ) : (
-    <span className="font-semibold text-muted">{author.displayName}</span>
+    <span className={`font-medium text-muted ${className}`}>{author.displayName}</span>
   );
 }
 
 function Menu({ children, label = "メニュー" }: { children: React.ReactNode; label?: string }) {
   return (
     <details className="relative">
-      <summary className="cursor-pointer list-none rounded-md px-2 py-1 text-muted hover:bg-canvas" aria-label={label}>
-        …
+      <summary
+        className="flex h-8 w-8 cursor-pointer list-none items-center justify-center text-muted transition-colors hover:text-ink"
+        aria-label={label}
+      >
+        <span aria-hidden className="flex gap-[3px]">
+          <i className="block h-[3px] w-[3px] rounded-full bg-current" />
+          <i className="block h-[3px] w-[3px] rounded-full bg-current" />
+          <i className="block h-[3px] w-[3px] rounded-full bg-current" />
+        </span>
       </summary>
-      <div className="absolute right-0 z-10 mt-1 w-64 space-y-2 rounded-lg border border-line bg-card p-3 shadow-lg">{children}</div>
+      <div className="fade-in absolute right-0 z-10 mt-2 w-72 space-y-3 border border-line bg-light p-4 shadow-lg">{children}</div>
     </details>
   );
 }
 
+/** 画像は角を落とさず、細い目地（2px）で並べる */
 function MediaGrid({ media }: { media: PostDTO["media"] }) {
   if (!media.length) return null;
   const cols = media.length === 1 ? "grid-cols-1" : "grid-cols-2";
   return (
-    <div className={`grid ${cols} gap-1 overflow-hidden rounded-lg`}>
+    <div className={`mt-5 grid ${cols} gap-0.5 bg-line`}>
       {media.map((m) => (
-        <a key={m.id} href={`/api/media/${m.id}`} target="_blank" rel="noopener" className="block bg-canvas">
+        <a key={m.id} href={`/api/media/${m.id}`} target="_blank" rel="noopener" className="block bg-concrete">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={`/api/media/${m.id}`}
@@ -41,7 +49,7 @@ function MediaGrid({ media }: { media: PostDTO["media"] }) {
             width={m.width}
             height={m.height}
             loading="lazy"
-            className={`w-full object-cover ${media.length === 1 ? "max-h-[520px]" : "aspect-square"}`}
+            className={`w-full object-cover ${media.length === 1 ? "max-h-[560px]" : "aspect-square"}`}
           />
         </a>
       ))}
@@ -49,10 +57,11 @@ function MediaGrid({ media }: { media: PostDTO["media"] }) {
   );
 }
 
-function ReactionBar({ target, reactions, mine }: { target: { postId?: string; commentId?: string }; reactions: PostDTO["reactions"]; mine: PostDTO["myReaction"] }) {
+/** リアクションは枠を持たない文字だけ。押したものだけ墨になり、下に細い線が入る */
+function ReactionBar({ target, reactions, mine, compact }: { target: { postId?: string; commentId?: string }; reactions: PostDTO["reactions"]; mine: PostDTO["myReaction"]; compact?: boolean }) {
   const keys = target.postId ? (Object.keys(REACTIONS) as (keyof typeof REACTIONS)[]) : (["like"] as const);
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div className={`flex flex-wrap items-center ${compact ? "gap-4" : "gap-6"}`}>
       {keys.map((k) => (
         <form key={k} action={reactAction}>
           {target.postId ? <input type="hidden" name="postId" value={target.postId} /> : <input type="hidden" name="commentId" value={target.commentId} />}
@@ -60,12 +69,12 @@ function ReactionBar({ target, reactions, mine }: { target: { postId?: string; c
           <button
             type="submit"
             aria-pressed={mine === k}
-            className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
-              mine === k ? "border-brand bg-brand-soft text-brand" : "border-line text-muted hover:bg-canvas"
+            className={`py-1 text-xs tracking-[0.08em] transition-colors duration-200 ${
+              mine === k ? "text-ink underline decoration-ink underline-offset-[6px]" : "text-muted hover:text-ink"
             }`}
           >
             {REACTIONS[k]}
-            {reactions[k] > 0 && <span className="ml-1 tabular-nums">{reactions[k]}</span>}
+            {reactions[k] > 0 && <span className="ml-1.5 tabular-nums">{reactions[k]}</span>}
           </button>
         </form>
       ))}
@@ -75,118 +84,132 @@ function ReactionBar({ target, reactions, mine }: { target: { postId?: string; c
 
 function CommentItem({ c, replies, allowReply }: { c: CommentDTO; replies: CommentDTO[]; allowReply: boolean }) {
   return (
-    <li className="flex gap-2">
-      <Avatar name={c.author.displayName} mediaId={c.author.avatarMediaId} size={30} />
-      <div className="min-w-0 flex-1 space-y-1">
-        <div className="rounded-xl bg-canvas px-3 py-2">
-          <div className="flex items-center gap-2 text-sm">
-            <AuthorName author={c.author} />
-            {c.hidden && <span className="badge bg-warn-soft text-warn">非表示中</span>}
-          </div>
-          <p className="whitespace-pre-wrap break-words text-sm">{c.body}</p>
+    <li className="flex gap-3">
+      <Avatar name={c.author.displayName} mediaId={c.author.avatarMediaId} size={28} />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-baseline gap-x-3 text-sm">
+          <AuthorName author={c.author} />
+          <span className="text-[11px] text-muted">{timeAgo(c.createdAt)}</span>
+          {c.hidden && <span className="badge text-warn">非表示中</span>}
         </div>
-        <div className="flex flex-wrap items-center gap-3 px-1 text-xs text-muted">
-          <span>{timeAgo(c.createdAt)}</span>
-          <ReactionBar target={{ commentId: c.id }} reactions={c.reactions} mine={c.myReaction} />
+        <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-[1.85]">{c.body}</p>
+        <div className="mt-1.5 flex flex-wrap items-center gap-4 text-xs text-muted">
+          <ReactionBar target={{ commentId: c.id }} reactions={c.reactions} mine={c.myReaction} compact />
           {c.isMine ? (
             <form action={deleteCommentAction}>
               <input type="hidden" name="commentId" value={c.id} />
-              <button className="hover:text-danger hover:underline">削除</button>
+              <button className="tracking-[0.08em] hover:text-danger">削除</button>
             </form>
           ) : (
             <details>
-              <summary className="cursor-pointer list-none hover:underline">通報</summary>
-              <div className="mt-2 w-64">
+              <summary className="cursor-pointer list-none tracking-[0.08em] hover:text-ink">通報</summary>
+              <div className="mt-3 w-72 border border-line bg-light p-4">
                 <ReportForm targetType="comment" targetId={c.id} />
+              </div>
+            </details>
+          )}
+          {allowReply && (
+            <details className="w-full">
+              <summary className="cursor-pointer list-none tracking-[0.08em] hover:text-ink">返信する</summary>
+              <div className="mt-3">
+                <CommentForm postId={c.postId} parentId={c.id} placeholder="返信を書く" />
               </div>
             </details>
           )}
         </div>
         {replies.length > 0 && (
-          <ul className="mt-2 space-y-2">
+          <ul className="mt-5 space-y-5 border-l border-line pl-5">
             {replies.map((r) => (
               <CommentItem key={r.id} c={r} replies={[]} allowReply={false} />
             ))}
           </ul>
-        )}
-        {allowReply && (
-          <details className="px-1">
-            <summary className="cursor-pointer list-none text-xs font-medium text-muted hover:underline">返信する</summary>
-            <div className="mt-2">
-              <CommentForm postId={c.postId} parentId={c.id} placeholder="返信を書く…" />
-            </div>
-          </details>
         )}
       </div>
     </li>
   );
 }
 
+/**
+ * 投稿。箱に入れず、上の 1px の線と余白だけで区切る。
+ * 読む順（誰が → 何を → 反応）に沿って、上から下へ一筆で視線が流れる配置にする。
+ */
 export function PostCard({ post, mode = "feed" }: { post: PostDTO; mode?: "feed" | "detail" }) {
   const top = post.comments.filter((c) => !c.parentId);
   const repliesOf = (id: string) => post.comments.filter((c) => c.parentId === id);
   return (
-    <article className="card space-y-3 p-4" data-testid="post" data-post-id={post.id}>
-      <header className="flex items-start gap-3">
-        <Avatar name={post.author.displayName} mediaId={post.author.avatarMediaId} />
-        <div className="min-w-0 flex-1">
-          <AuthorName author={post.author} />
-          <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted">
-            <Link href={`/posts/${post.id}`} className="hover:underline">
+    <article className="fade-in border-t border-line py-10" data-testid="post" data-post-id={post.id}>
+      <header className="flex items-center gap-3">
+        <Avatar name={post.author.displayName} mediaId={post.author.avatarMediaId} size={36} />
+        <div className="min-w-0 flex-1 leading-tight">
+          <AuthorName author={post.author} className="text-[15px]" />
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] tracking-[0.06em] text-muted">
+            <Link href={`/posts/${post.id}`} className="hover:text-ink">
               {timeAgo(post.createdAt)}
             </Link>
-            <span>・{VISIBILITY_LABEL[post.visibility]}</span>
-            {post.editedAt && <span>・編集済み</span>}
+            <span aria-hidden>／</span>
+            <span>{VISIBILITY_LABEL[post.visibility]}</span>
+            {post.editedAt && (
+              <>
+                <span aria-hidden>／</span>
+                <span>編集済み</span>
+              </>
+            )}
           </div>
         </div>
-        {post.hidden && <span className="badge bg-warn-soft text-warn">非表示中（管理者対応）</span>}
+        {post.hidden && <span className="badge text-warn">非表示中（管理者対応）</span>}
         <Menu>
           {post.isMine ? (
             <>
-              <Link href={`/posts/${post.id}/edit`} className="block rounded px-2 py-1 text-sm hover:bg-canvas">
+              <Link href={`/posts/${post.id}/edit`} className="block py-1.5 text-sm hover:underline hover:underline-offset-4">
                 編集する
               </Link>
               <details>
-                <summary className="cursor-pointer list-none rounded px-2 py-1 text-sm text-danger hover:bg-canvas">削除する</summary>
-                <form action={deletePostAction} className="mt-2 space-y-2 px-2">
+                <summary className="cursor-pointer list-none py-1.5 text-sm text-danger hover:underline hover:underline-offset-4">削除する</summary>
+                <form action={deletePostAction} className="mt-3 space-y-3">
                   <input type="hidden" name="postId" value={post.id} />
-                  <p className="text-xs text-muted">削除すると元に戻せません。</p>
-                  <button className="btn-danger w-full py-1.5">削除を確定する</button>
+                  <p className="text-xs leading-relaxed text-muted">削除すると元に戻せません。画像も消えます。</p>
+                  <button className="btn-danger w-full">削除を確定する</button>
                 </form>
               </details>
             </>
           ) : (
             <>
-              <p className="text-sm font-semibold">この投稿を通報</p>
+              <p className="plaque">REPORT</p>
               <ReportForm targetType="post" targetId={post.id} />
             </>
           )}
         </Menu>
       </header>
 
-      {post.body && <p className="whitespace-pre-wrap break-words text-[15px] leading-relaxed">{post.body}</p>}
+      {post.body && <p className="mt-5 whitespace-pre-wrap break-words text-[15.5px] leading-[1.95]">{post.body}</p>}
       <MediaGrid media={post.media} />
 
-      <div className="flex items-center justify-between gap-2 border-t border-line pt-3">
+      <div className="mt-6 flex items-center justify-between gap-4">
         <ReactionBar target={{ postId: post.id }} reactions={post.reactions} mine={post.myReaction} />
-        <Link href={`/posts/${post.id}`} className="text-xs text-muted hover:underline">
-          コメント {post.commentCount} 件
+        <Link href={`/posts/${post.id}`} className="text-xs tracking-[0.08em] text-muted hover:text-ink">
+          コメント <span className="tabular-nums">{post.commentCount}</span>
         </Link>
       </div>
 
-      {top.length > 0 && (
-        <ul className="space-y-3">
-          {top.map((c) => (
-            <CommentItem key={c.id} c={c} replies={mode === "detail" ? repliesOf(c.id) : []} allowReply={mode === "detail"} />
-          ))}
-        </ul>
+      {(top.length > 0 || mode === "detail") && (
+        <div className="mt-6 space-y-5 border-l border-line pl-5">
+          {top.length > 0 && (
+            <ul className="space-y-6">
+              {top.map((c) => (
+                <CommentItem key={c.id} c={c} replies={mode === "detail" ? repliesOf(c.id) : []} allowReply={mode === "detail"} />
+              ))}
+            </ul>
+          )}
+          {mode === "feed" && post.commentCount > top.length && (
+            <Link href={`/posts/${post.id}`} className="btn-link block text-xs">
+              コメントをすべて見る
+            </Link>
+          )}
+        </div>
       )}
-      {mode === "feed" && post.commentCount > top.length && (
-        <Link href={`/posts/${post.id}`} className="btn-link block">
-          コメントをすべて見る
-        </Link>
-      )}
-      <CommentForm postId={post.id} />
+      <div className="mt-5">
+        <CommentForm postId={post.id} />
+      </div>
     </article>
   );
 }

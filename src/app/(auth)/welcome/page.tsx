@@ -12,10 +12,11 @@ export default async function WelcomePage() {
   return (
     <div className="card space-y-5 p-6">
       <div>
-        <h1 className="h1">{v.displayName} さん、ようこそ</h1>
+        <p className="plaque">WELCOME</p>
+        <h1 className="h1 mt-2">{v.displayName} さん、ようこそ</h1>
         <p className="mt-1 text-sm text-muted">入会が承認されました。はじめに利用規約を確認してください。</p>
       </div>
-      <div className="max-h-80 overflow-y-auto rounded-lg border border-line p-4 text-sm">
+      <div className="max-h-80 overflow-y-auto border border-line bg-light p-5 text-sm">
         <TermsBody />
       </div>
       <form action={acceptTermsAction} className="space-y-3">

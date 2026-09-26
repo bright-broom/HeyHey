@@ -32,8 +32,8 @@ export function InviteForm({ admin, disabled }: { admin: boolean; disabled: bool
         <SubmitButton className="btn-primary" disabled={disabled}>招待リンクを発行</SubmitButton>
       </form>
       {url && (
-        <div className="space-y-2 rounded-lg border border-ok/30 bg-ok-soft p-3">
-          <p className="text-sm font-semibold text-ok">招待リンクを発行しました。この画面を閉じると再表示できません。</p>
+        <div className="fade-in space-y-3 border-l-2 border-ink bg-light p-5">
+          <p className="text-sm font-medium">招待リンクを発行しました。この画面を閉じると再表示できません。</p>
           <div className="flex gap-2">
             <input readOnly value={url} className="input font-mono text-xs" aria-label="招待リンク" data-testid="invite-url" onFocus={(e) => e.currentTarget.select()} />
             <button

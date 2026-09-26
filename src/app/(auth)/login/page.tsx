@@ -17,15 +17,18 @@ export default async function LoginPage(props: PageProps<"/login">) {
   const notice = typeof sp.e === "string" ? NOTICES[sp.e] : undefined;
   const next = typeof sp.next === "string" ? sp.next : undefined;
   return (
-    <div className="card space-y-5 p-6">
+    <div className="space-y-10">
       <div>
-        <h1 className="h1">ログイン</h1>
-        <p className="mt-1 text-sm text-muted">招待を受けて承認されたメンバーだけが利用できるコミュニティです。</p>
+        <p className="plaque">SIGN IN</p>
+        <h1 className="h1 mt-2">ログイン</h1>
       </div>
-      {notice && <p className="rounded-lg bg-brand-soft px-3 py-2 text-sm text-brand">{notice}</p>}
+      {notice && <p className="border-l-2 border-ink py-1 pl-3 text-sm">{notice}</p>}
       <LoginForm next={next} />
-      <p className="text-xs text-muted">
-        まだアカウントがない場合は、メンバーから届いた招待リンクを開いて申請してください。招待リンクがないと登録できません。
+      <div className="rule" />
+      <p className="text-xs leading-loose text-muted">
+        はじめての方は、メンバーから届いた招待リンクを開いて申請してください。
+        <br />
+        招待リンクがなければ登録できません。
       </p>
     </div>
   );

@@ -17,11 +17,14 @@ export default async function JoinPage(props: PageProps<"/join/[token]">) {
     );
   }
   return (
-    <div className="card space-y-5 p-6">
+    <div className="card space-y-10 p-6">
       <div>
-        <h1 className="h1">入会申請</h1>
-        <p className="mt-1 text-sm text-muted">
-          <strong className="text-ink">{check.inviterName}</strong> さんから招待されています。申請内容を管理者が確認し、承認されると参加できます。
+        <p className="plaque">APPLICATION</p>
+        <h1 className="h1 mt-2">入会申請</h1>
+        <p className="mt-4 text-sm leading-loose text-muted">
+          <strong className="font-medium text-ink">{check.inviterName}</strong> さんから招待されています。
+          <br />
+          管理者が申請を確認し、承認されると参加できます。
         </p>
       </div>
       <RegisterForm token={token} />

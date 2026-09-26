@@ -4,14 +4,15 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import { createPostAction } from "@/app/actions/content";
 import { FormMessage } from "./FormMessage";
 import { SubmitButton } from "./SubmitButton";
+import { VisibilityToggle } from "./VisibilityToggle";
 
 const MAX_FILES = 4;
 const MAX_BYTES = 8 * 1024 * 1024;
 
+/** 光の当たった一枚の面。書く場所だけを置き、道具は下の一列にまとめる */
 export function Composer({ name }: { name: string }) {
   const [state, action] = useActionState(createPostAction, undefined);
   const formRef = useRef<HTMLFormElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
   const [previews, setPreviews] = useState<string[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
 
@@ -25,55 +26,56 @@ export function Composer({ name }: { name: string }) {
   function onFiles(e: React.ChangeEvent<HTMLInputElement>) {
     const list = Array.from(e.target.files ?? []);
     setFileError(null);
-    if (list.length > MAX_FILES) {
-      setFileError(`画像は ${MAX_FILES} 枚までです。`);
+    const reject = (msg: string) => {
+      setFileError(msg);
       e.target.value = "";
       setPreviews([]);
-      return;
-    }
-    if (list.some((f) => f.size > MAX_BYTES)) {
-      setFileError("画像は 1 枚 8MB までです。");
-      e.target.value = "";
-      setPreviews([]);
-      return;
-    }
+    };
+    if (list.length > MAX_FILES) return reject(`画像は ${MAX_FILES} 枚までです。`);
+    if (list.some((f) => f.size > MAX_BYTES)) return reject("画像は 1 枚 8MB までです。");
     setPreviews(list.map((f) => URL.createObjectURL(f)));
   }
 
   return (
-    <form ref={formRef} action={action} className="card space-y-3 p-4" aria-label="投稿する">
+    <form ref={formRef} action={action} className="border border-line bg-light transition-colors duration-200 focus-within:border-ink" aria-label="投稿する">
       <textarea
         name="body"
         rows={3}
         maxLength={5000}
         defaultValue={state?.fields?.body}
-        placeholder={`${name} さん、いまどうしていますか？`}
-        className="input resize-y"
+        placeholder={`${name} さん、いま何を考えていますか。`}
+        className="block w-full resize-y border-0 bg-transparent px-4 pb-4 pt-5 text-[15px] leading-[1.9] outline-none placeholder:text-muted/80 sm:px-6 sm:pt-6"
         aria-label="本文"
       />
       {previews.length > 0 && (
-        <div className="grid grid-cols-4 gap-2">
-          {previews.map((u) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img key={u} src={u} alt="" className="aspect-square w-full rounded-lg object-cover" />
-          ))}
+        <div className="px-4 pb-4 sm:px-6">
+          <div className="grid grid-cols-4 gap-0.5">
+            {previews.map((u) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img key={u} src={u} alt="" className="aspect-square w-full object-cover" />
+            ))}
+          </div>
+          {/* 画像を選んだときだけ、必要な安心材料を添える */}
+          <p className="hint">位置情報などのメタデータは取り除いてから保存されます。</p>
         </div>
       )}
-      <FormMessage state={fileError ? { error: fileError } : state?.error ? state : undefined} />
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="btn-ghost cursor-pointer">
-          画像を追加
-          <input ref={fileRef} type="file" name="images" accept="image/jpeg,image/png,image/webp,image/gif" multiple className="sr-only" onChange={onFiles} />
+      {(fileError || state?.error) && (
+        <div className="px-4 pb-4 sm:px-6">
+          <FormMessage state={fileError ? { error: fileError } : state} />
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-3 border-t border-line px-4 py-3 sm:px-6">
+        <label className="cursor-pointer text-xs tracking-[0.08em] text-muted transition-colors hover:text-ink">
+          ＋ 画像{previews.length ? `（${previews.length}）` : ""}
+          <input type="file" name="images" accept="image/jpeg,image/png,image/webp,image/gif" multiple className="sr-only" onChange={onFiles} />
         </label>
-        <select name="visibility" defaultValue="members" className="input w-auto py-2 text-sm" aria-label="公開範囲">
-          <option value="members">全会員に公開</option>
-          <option value="friends">友達のみ</option>
-        </select>
-        <SubmitButton className="btn-primary ml-auto" pendingText="投稿中…">
-          投稿する
-        </SubmitButton>
+        <div className="ml-auto flex items-center gap-3">
+          <VisibilityToggle />
+          <SubmitButton className="btn-primary" pendingText="投稿中…">
+            投稿する
+          </SubmitButton>
+        </div>
       </div>
-      <p className="hint">画像は位置情報などのメタデータを取り除いてから保存されます。</p>
     </form>
   );
 }

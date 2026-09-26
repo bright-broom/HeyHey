@@ -1,3 +1,4 @@
+import { PageTitle } from "@/components/PageTitle";
 import { formatDateTime } from "@/components/time";
 import { getDb } from "@/server/db/client";
 import { listAuditLogs } from "@/server/services/admin";
@@ -29,10 +30,7 @@ export default async function AuditPage() {
   const logs = await listAuditLogs(await getDb(), viewer);
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="h1">監査ログ</h1>
-        <p className="mt-1 text-sm text-muted">承認・停止・権限変更・通報の処理などを記録しています。このログは誰も書き換え・削除できません（最新 200 件）。</p>
-      </div>
+      <PageTitle bare plaque="AUDIT LOG" title="監査ログ" lead="承認・停止・権限変更・通報の処理などの記録です。誰も書き換え・削除できません（最新 200 件）。" />
       <div className="card overflow-x-auto">
         <table className="w-full min-w-[720px] text-sm">
           <thead className="border-b border-line bg-canvas text-left text-xs text-muted">

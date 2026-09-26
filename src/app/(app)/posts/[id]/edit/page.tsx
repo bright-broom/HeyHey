@@ -1,3 +1,4 @@
+import { PageTitle } from "@/components/PageTitle";
 import { notFound } from "next/navigation";
 import { getDb } from "@/server/db/client";
 import { getPost } from "@/server/services/posts";
@@ -12,8 +13,8 @@ export default async function EditPostPage(props: PageProps<"/posts/[id]/edit">)
   const post = await getPost(await getDb(), viewer, id);
   if (!post || !post.isMine) notFound();
   return (
-    <div className="mx-auto max-w-2xl space-y-3">
-      <h1 className="h1">投稿を編集</h1>
+    <div className="max-w-[640px]">
+      <PageTitle plaque="EDIT" title="投稿を編集" />
       <EditForm id={post.id} body={post.body} visibility={post.visibility} />
     </div>
   );

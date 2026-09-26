@@ -54,7 +54,7 @@ export default async function ReportCasePage(props: PageProps<"/admin/reports/[t
             {reports.map((r) => (
               <li key={r.id} className="py-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-semibold">{REPORT_REASONS[r.reason]}</span>
+                  <span className="font-medium">{REPORT_REASONS[r.reason]}</span>
                   <span className="text-xs text-muted">{r.reporterName} ・ {formatDateTime(r.createdAt)}</span>
                   {r.status === "resolved" && r.resolution && <span className="badge bg-canvas text-muted">処理済み：{RESOLUTIONS[r.resolution]}</span>}
                 </div>
