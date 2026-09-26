@@ -4,6 +4,8 @@ import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/server/db/client";
 import { AppError } from "@/server/lib/errors";
+import { isMember } from "@/server/lib/policy";
+import { searchMembers } from "@/server/services/members";
 import { addComment, createPost, deleteComment, deletePost, toggleReaction, updatePost } from "@/server/services/posts";
 import { createReport } from "@/server/services/reports";
 import { attempt, files, str, type FormState } from "@/server/web/action";
@@ -92,4 +94,15 @@ export async function reportAction(_: FormState, fd: FormData): Promise<FormStat
   });
   if (res?.error) return res;
   return { ok: duplicated ? "この内容はすでに通報済みです。" : "通報を受け付けました。管理者が確認します。" };
+}
+
+/** メンションの候補（入力欄で @ の後に打った文字で検索）。ブロック関係の人は searchMembers が外す */
+export async function suggestMembersAction(q: string): Promise<{ id: string; displayName: string; affiliation: string | null }[]> {
+  const { db, viewer } = await ctx();
+  if (!isMember(viewer) || typeof q !== "string") return [];
+  const rows = await searchMembers(db, viewer, q.slice(0, 30));
+  return rows
+    .filter((r) => r.id !== viewer.id)
+    .slice(0, 8)
+    .map((r) => ({ id: r.id, displayName: r.displayName, affiliation: r.affiliation }));
 }

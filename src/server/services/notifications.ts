@@ -8,6 +8,7 @@ import type { Viewer } from "../lib/viewer";
 export type NotificationType =
   | "comment"
   | "reply"
+  | "mention"
   | "reaction"
   | "friend_request"
   | "friend_accepted"

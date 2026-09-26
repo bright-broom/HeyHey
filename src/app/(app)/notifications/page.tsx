@@ -30,6 +30,8 @@ function describe(n: N): { text: string; href?: string } {
       return { text: `あなたの通報が処理されました（${d.resolution}）` };
     case "moderation":
       return { text: `あなたの${d.targetType === "comment" ? "コメント" : "投稿"}に対して管理者が対応しました（${d.resolution}）${d.note ? `：${d.note}` : ""}` };
+    case "mention":
+      return { text: `${who} さんがあなたをメンションしました`, href: `/posts/${n.postId}` };
     case "application_submitted":
       return { text: `新しい入会申請が届きました（${d.name ?? ""}）`, href: "/admin/applications" };
     case "report_submitted":

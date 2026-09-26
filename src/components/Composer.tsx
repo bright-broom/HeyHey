@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useRef, useState } from "react";
 import { createPostAction } from "@/app/actions/content";
 import { FormMessage } from "./FormMessage";
+import { MentionField } from "./MentionField";
 import { SubmitButton } from "./SubmitButton";
 import { VisibilityToggle } from "./VisibilityToggle";
 
@@ -38,12 +39,13 @@ export function Composer({ name }: { name: string }) {
 
   return (
     <form ref={formRef} action={action} className="border border-line bg-light transition-colors duration-200 focus-within:border-ink" aria-label="投稿する">
-      <textarea
+      <MentionField
+        multiline
         name="body"
         rows={3}
         maxLength={5000}
         defaultValue={state?.fields?.body}
-        placeholder={`${name} さん、いま何を考えていますか。`}
+        placeholder={`${name} さん、いま何を考えていますか。（@ でメンション、# でタグ）`}
         className="block w-full resize-y border-0 bg-transparent px-4 pb-4 pt-5 text-[15px] leading-[1.9] outline-none placeholder:text-muted/80 sm:px-6 sm:pt-6"
         aria-label="本文"
       />

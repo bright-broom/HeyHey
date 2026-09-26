@@ -4,6 +4,7 @@ import { REACTIONS, VISIBILITY_LABEL, type CommentDTO, type PostDTO } from "@/se
 import { Avatar } from "./Avatar";
 import { CommentForm } from "./CommentForm";
 import { ReportForm } from "./ReportForm";
+import { RichText } from "./RichText";
 import { timeAgo } from "./time";
 
 function AuthorName({ author, className = "" }: { author: PostDTO["author"]; className?: string }) {
@@ -92,7 +93,7 @@ function CommentItem({ c, replies, allowReply }: { c: CommentDTO; replies: Comme
           <span className="text-[11px] text-muted">{timeAgo(c.createdAt)}</span>
           {c.hidden && <span className="badge text-warn">非表示中</span>}
         </div>
-        <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-[1.85]">{c.body}</p>
+        <RichText body={c.body} className="mt-1 whitespace-pre-wrap break-words text-sm leading-[1.85]" />
         <div className="mt-1.5 flex flex-wrap items-center gap-4 text-xs text-muted">
           <ReactionBar target={{ commentId: c.id }} reactions={c.reactions} mine={c.myReaction} compact />
           {c.isMine ? (
@@ -181,7 +182,7 @@ export function PostCard({ post, mode = "feed" }: { post: PostDTO; mode?: "feed"
         </Menu>
       </header>
 
-      {post.body && <p className="mt-5 whitespace-pre-wrap break-words text-[15.5px] leading-[1.95]">{post.body}</p>}
+      {post.body && <RichText body={post.body} className="mt-5 whitespace-pre-wrap break-words text-[15.5px] leading-[1.95]" />}
       <MediaGrid media={post.media} />
 
       <div className="mt-6 flex items-center justify-between gap-4">

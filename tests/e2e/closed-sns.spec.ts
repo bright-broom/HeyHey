@@ -181,7 +181,7 @@ test("「友達のみ」の投稿は友達以外に見えない。コメント�
   // 新人がオーナーの投稿にコメント → オーナーに通知
   await p.goto("/");
   const post = p.getByTestId("post").filter({ hasText: "オーナーからのお知らせ" });
-  await post.getByRole("textbox", { name: "コメントを書く" }).fill("よろしくお願いします！");
+  await post.getByLabel("コメントを書く").fill("よろしくお願いします！");
   await post.getByRole("button", { name: "送信" }).click();
   await expect(post.getByText("よろしくお願いします！")).toBeVisible();
   await ownerPage.goto("/notifications");

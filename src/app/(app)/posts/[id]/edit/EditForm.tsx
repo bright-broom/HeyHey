@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useActionState } from "react";
 import { updatePostAction } from "@/app/actions/content";
 import { FormMessage } from "@/components/FormMessage";
+import { MentionField } from "@/components/MentionField";
 import { SubmitButton } from "@/components/SubmitButton";
 import { VisibilityToggle } from "@/components/VisibilityToggle";
 
@@ -12,7 +13,7 @@ export function EditForm({ id, body, visibility }: { id: string; body: string; v
   return (
     <form action={action} className="card space-y-5 p-6">
       <input type="hidden" name="postId" value={id} />
-      <textarea name="body" rows={6} maxLength={5000} defaultValue={body} className="input" aria-label="本文" />
+      <MentionField multiline name="body" rows={6} maxLength={5000} defaultValue={body} className="input" aria-label="本文" />
       <VisibilityToggle defaultValue={visibility} />
       <FormMessage state={state} />
       <div className="flex gap-2">

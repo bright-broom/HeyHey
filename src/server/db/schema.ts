@@ -221,6 +221,18 @@ export const posts = pgTable(
   (t) => [index("posts_created_idx").on(t.createdAt), index("posts_author_idx").on(t.authorId, t.createdAt)],
 );
 
+/** 投稿のハッシュタグ（本文から抜き出して保存。タグの一覧も公開範囲の判定を通す） */
+export const postTags = pgTable(
+  "post_tags",
+  {
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => posts.id, { onDelete: "cascade" }),
+    tag: text("tag").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.postId, t.tag] }), index("post_tags_tag_idx").on(t.tag)],
+);
+
 export const media = pgTable(
   "media",
   {

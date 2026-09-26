@@ -34,7 +34,8 @@ function authorIsShowable(authorIdCol: SQL | typeof posts.authorId | typeof comm
   return sql`EXISTS (SELECT 1 FROM users au WHERE au.id = ${authorIdCol} AND au.status IN ('active', 'withdrawn'))`;
 }
 
-export function visiblePost(viewerId: string): SQL {
+/** viewerId は会員 ID の文字列か、別の問い合わせの会員 ID 列（「この人から見えるか」を SQL の中で判定するとき） */
+export function visiblePost(viewerId: string | SQL): SQL {
   return and(
     isNull(posts.deletedAt),
     or(
@@ -54,7 +55,7 @@ export function visiblePost(viewerId: string): SQL {
 }
 
 /** コメントは「親投稿が見えること」＋コメント自体の状態で判定 */
-export function visibleComment(viewerId: string): SQL {
+export function visibleComment(viewerId: string | SQL): SQL {
   return and(
     isNull(comments.deletedAt),
     sql`EXISTS (SELECT 1 FROM posts WHERE posts.id = ${comments.postId} AND ${visiblePost(viewerId)})`,
