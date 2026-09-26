@@ -207,4 +207,18 @@ describe("登録 → メール確認 → 審査 → 規約同意", () => {
     const open = await listApplications(d, admin.viewer);
     expect(open.find((a) => a.id === app!.id)?.status).toBe("on_hold");
   });
+
+  it("EMAIL_VERIFICATION=off なら、確認メールなしで申請中になり管理者に届く", async () => {
+    const admin = await makeUser(d, { role: "admin" });
+    const { token } = await createInvitation(d, admin.viewer, {});
+    process.env.EMAIL_VERIFICATION = "off";
+    try {
+      const { f, userId } = await reg(token);
+      expect((await refreshViewer(d, userId)).status).toBe("pending");
+      expect(await tokenFromMail(f.email, "/verify/")).toBe("");
+      expect((await listApplications(d, admin.viewer)).map((a) => a.userId)).toContain(userId);
+    } finally {
+      delete process.env.EMAIL_VERIFICATION;
+    }
+  });
 });

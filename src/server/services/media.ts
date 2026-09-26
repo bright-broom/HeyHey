@@ -1,5 +1,3 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
 import sharp, { type Metadata } from "sharp";
 import { and, eq, sql } from "drizzle-orm";
@@ -9,15 +7,14 @@ import { invalid } from "../lib/errors";
 import { isAdmin, isMember } from "../lib/policy";
 import { visiblePost } from "../lib/visibility";
 import type { Viewer } from "../lib/viewer";
+import { removeStoredFile, storeFile } from "./storage";
+
+export { removeStoredFile };
 
 export const MAX_IMAGES_PER_POST = 4;
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_EDGE = 2048;
 const ALLOWED_INPUT = new Set(["jpeg", "png", "webp", "gif"]);
-
-function uploadDir(): string {
-  return path.resolve(/*turbopackIgnore: true*/ process.env.UPLOAD_DIR ?? path.join(/*turbopackIgnore: true*/ process.cwd(), ".data", "uploads"));
-}
 
 export type ProcessedImage = { key: string; width: number; height: number; bytes: number; mime: string };
 
@@ -45,14 +42,8 @@ export async function processImage(input: Buffer, opts: { square?: number } = {}
   const { data, info } = await pipeline.webp({ quality: 82 }).toBuffer({ resolveWithObject: true });
 
   const key = `${randomUUID()}.webp`;
-  await fs.mkdir(uploadDir(), { recursive: true });
-  await fs.writeFile(path.join(/*turbopackIgnore: true*/ uploadDir(), key), data, { mode: 0o600 });
+  await storeFile(key, data, "image/webp");
   return { key, width: info.width, height: info.height, bytes: data.byteLength, mime: "image/webp" };
-}
-
-export async function removeStoredFile(key: string): Promise<void> {
-  if (!/^[0-9a-f-]{36}\.webp$/.test(key)) return;
-  await fs.rm(path.join(/*turbopackIgnore: true*/ uploadDir(), key), { force: true });
 }
 
 /**
@@ -84,6 +75,5 @@ export async function mediaForViewer(db: Db, viewer: Viewer | null, mediaId: str
         : false;
     if (!p && !reportedForAdmin) return null;
   }
-  const filePath = path.join(/*turbopackIgnore: true*/ uploadDir(), m.storageKey);
-  return { filePath, mime: m.mime, bytes: m.bytes };
+  return { storageKey: m.storageKey, mime: m.mime, bytes: m.bytes };
 }

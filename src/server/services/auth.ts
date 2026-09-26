@@ -18,6 +18,9 @@ const DAY = 24 * 60 * 60 * 1000;
 
 export const normalizeEmail = (e: string) => e.trim().toLowerCase();
 
+/** メール送信サービスがまだない運用向けに、EMAIL_VERIFICATION=off で確認ステップを省ける */
+export const emailVerificationEnabled = () => process.env.EMAIL_VERIFICATION !== "off";
+
 // ───────── セッション ─────────
 
 export async function createSession(db: DbOrTx, userId: string): Promise<{ token: string; expiresAt: Date }> {
@@ -214,7 +217,13 @@ export async function register(db: Db, raw: RegisterInput, ctx: { ip: string }):
       introduction: input.introduction,
     });
     await audit(tx, { actorId: userId, action: "user.register", targetType: "user", targetId: userId, meta: { invitationId: claimed.id } });
-    await issueVerification(tx, userId, input.email, { displayName: input.displayName, inviterName: inv.inviterName });
+    if (emailVerificationEnabled()) {
+      await issueVerification(tx, userId, input.email, { displayName: input.displayName, inviterName: inv.inviterName });
+    } else {
+      // メール確認を省く運用：招待リンク＋管理者の承認だけで入会を判断する
+      await tx.update(users).set({ status: "pending", updatedAt: new Date() }).where(eq(users.id, userId));
+      await notifyAdmins(tx, { type: "application_submitted", actorId: userId, data: { name: input.displayName } });
+    }
     return { userId };
   });
   return result;

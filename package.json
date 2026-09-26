@@ -19,10 +19,14 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "verify": "npm run typecheck && npm test && npm run build && npm run test:e2e",
-    "demo": "npm run db:migrate && npm run db:seed -- --demo"
+    "demo": "npm run db:migrate && npm run db:seed -- --demo",
+    "vercel-build": "npm run db:migrate && next build",
+    "test:pg": "vitest run --config vitest.pg.config.mts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
+    "@vercel/blob": "^2.8.0",
+    "@vercel/functions": "^3.9.9",
     "drizzle-orm": "^0.45.3",
     "next": "^16.3.6",
     "pg": "^8.23.0",

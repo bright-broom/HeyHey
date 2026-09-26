@@ -26,9 +26,24 @@ async function open(): Promise<Db> {
   if (url) {
     const { Pool } = await import("pg");
     const { drizzle } = await import("drizzle-orm/node-postgres");
-    const pool = new Pool({ connectionString: url, max: Number(process.env.DB_POOL_MAX ?? 10) });
+    const onVercel = !!process.env.VERCEL;
+    const pool = new Pool({
+      connectionString: url,
+      // Vercel（Fluid compute）はインスタンスが並列に増えるので、1 インスタンスあたりの接続は少なく
+      max: Number(process.env.DB_POOL_MAX ?? (onVercel ? 5 : 10)),
+      idleTimeoutMillis: onVercel ? 5_000 : 30_000,
+    });
+    if (onVercel) {
+      // インスタンスが休止する前にアイドル接続を確実に閉じる（接続リーク防止）
+      const { attachDatabasePool } = await import("@vercel/functions");
+      attachDatabasePool(pool);
+    }
     holder.close = () => pool.end();
     return drizzle(pool, { schema });
+  }
+  if (process.env.VERCEL) {
+    // サーバーレスでは PGlite のファイルが永続しない。設定漏れで「データが消える本番」にならないよう止める
+    throw new Error("DATABASE_URL が設定されていません（Vercel では PostgreSQL が必須です）");
   }
 
   const { PGlite } = await import("@electric-sql/pglite");

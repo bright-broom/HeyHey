@@ -1,6 +1,19 @@
 export const metadata = { title: "確認メールを送信しました" };
 
+import { emailVerificationEnabled } from "@/server/services/auth";
+
+export const dynamic = "force-dynamic";
+
 export default function SentPage() {
+  if (!emailVerificationEnabled()) {
+    return (
+      <div className="card space-y-3 p-6">
+        <h1 className="h1">申請を受け付けました</h1>
+        <p className="text-sm">管理者が申請内容を確認します。承認されると、登録したメールアドレスとパスワードでログインできるようになります。</p>
+        <p className="text-sm text-muted">審査の状況は、ログインすると確認できます。</p>
+      </div>
+    );
+  }
   return (
     <div className="card space-y-3 p-6">
       <h1 className="h1">確認メールを送信しました</h1>
