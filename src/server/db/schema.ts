@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   bigserial,
+  boolean,
   check,
   index,
   integer,
@@ -364,10 +365,27 @@ export const notifications = pgTable(
     postId: uuid("post_id"),
     data: jsonb("data").$type<Record<string, unknown>>().notNull().default({}),
     readAt: ts("read_at"),
+    /** メールで知らせた日時（まとめて 1 通にするため、送ったものに印を付ける） */
+    emailedAt: ts("emailed_at"),
     createdAt: createdAt(),
   },
   (t) => [index("notifications_user_idx").on(t.userId, t.createdAt)],
 );
+
+/**
+ * メールでのお知らせの設定（F-19）。行がなければ既定値（どちらも受け取る）。
+ * メールには投稿の中身も人の名前も書かず、件数とリンクだけを送る。
+ */
+export const notificationPrefs = pgTable("notification_prefs", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  emailInstant: boolean("email_instant").notNull().default(true),
+  emailDigest: boolean("email_digest").notNull().default(true),
+  lastEmailAt: ts("last_email_at"),
+  lastDigestAt: ts("last_digest_at"),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
+});
 
 export const reports = pgTable(
   "reports",

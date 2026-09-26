@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { getDb } from "@/server/db/client";
 import { AppError } from "@/server/lib/errors";
 import { blockUser, muteUser, unblockUser, unmuteUser } from "@/server/services/blocks";
+import { setEmailPrefs, unsubscribe } from "@/server/services/email-notify";
 import { removeFriend, requestFriend, respondFriend } from "@/server/services/friends";
 import { createInvitation, revokeInvitation } from "@/server/services/invites";
 import { updateProfile, withdraw } from "@/server/services/members";
@@ -113,4 +114,21 @@ export async function withdrawAction(_: FormState, fd: FormData): Promise<FormSt
   if (res?.error) return res;
   await clearSessionCookie();
   redirect("/login?e=withdrawn");
+}
+
+export async function emailPrefsAction(fd: FormData) {
+  const { db, viewer } = await ctx();
+  await quiet(
+    () => setEmailPrefs(db, viewer!, { emailInstant: str(fd, "emailInstant") === "on", emailDigest: str(fd, "emailDigest") === "on" }),
+    "メールの設定を保存しました。",
+  );
+}
+
+/** メールの配信停止リンク（ログイン不要。トークンは会員 ID と種類への署名） */
+export async function unsubscribeAction(_: FormState, fd: FormData): Promise<FormState> {
+  const db = await getDb();
+  return attempt(async () => {
+    const kind = await unsubscribe(db, str(fd, "token"));
+    return kind === "instant" ? "お知らせのメールを止めました。" : "週 1 回のまとめのメールを止めました。";
+  });
 }

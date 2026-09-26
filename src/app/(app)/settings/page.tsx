@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { PageTitle } from "@/components/PageTitle";
 import { getDb } from "@/server/db/client";
-import { relationAction } from "@/app/actions/social";
+import { emailPrefsAction, relationAction } from "@/app/actions/social";
 import { Avatar } from "@/components/Avatar";
 import { listBlocksAndMutes } from "@/server/services/blocks";
+import { getEmailPrefs } from "@/server/services/email-notify";
 import { getProfile } from "@/server/services/members";
 import { requireMember } from "@/server/web/session";
 import { PasswordForm, ProfileForm, WithdrawForm } from "./Forms";
@@ -13,7 +14,7 @@ export const metadata = { title: "設定" };
 export default async function SettingsPage() {
   const viewer = await requireMember();
   const db = await getDb();
-  const [me, relations] = await Promise.all([getProfile(db, viewer, viewer.id).then((p) => p!), listBlocksAndMutes(db, viewer)]);
+  const [me, relations, emailPrefs] = await Promise.all([getProfile(db, viewer, viewer.id).then((p) => p!), listBlocksAndMutes(db, viewer), getEmailPrefs(db, viewer)]);
   return (
     <div className="max-w-3xl space-y-10">
       <PageTitle plaque="SETTINGS" title="設定" />
@@ -33,6 +34,29 @@ export default async function SettingsPage() {
       <section className="card space-y-6 p-6 sm:p-8">
         <h2 className="h2">パスワード</h2>
         <PasswordForm />
+      </section>
+      <section className="card space-y-5 p-6 sm:p-8">
+        <div>
+          <h2 className="h2">メールでのお知らせ</h2>
+          <p className="mt-2 text-sm leading-relaxed text-muted">メールには投稿の内容や人の名前を書かず、件数とリンクだけをお送りします。</p>
+        </div>
+        <form action={emailPrefsAction} className="space-y-3">
+          <label className="flex items-start gap-3 text-sm">
+            <input type="checkbox" name="emailInstant" defaultChecked={emailPrefs.emailInstant} className="mt-1" />
+            <span>
+              メンション・コメント・返信・友達申請を知らせる
+              <span className="hint mt-0.5 block">続けて届いても、15 分に 1 通にまとめます。</span>
+            </span>
+          </label>
+          <label className="flex items-start gap-3 text-sm">
+            <input type="checkbox" name="emailDigest" defaultChecked={emailPrefs.emailDigest} className="mt-1" />
+            <span>
+              週 1 回のまとめ（月曜の朝）
+              <span className="hint mt-0.5 block">新しい投稿の数と、未読のお知らせの数をお送りします。</span>
+            </span>
+          </label>
+          <button className="btn-ghost">保存する</button>
+        </form>
       </section>
       <section className="card space-y-6 p-6 sm:p-8">
         <h2 className="h2">ブロック・ミュート中の人</h2>

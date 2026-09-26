@@ -16,6 +16,7 @@ import {
 } from "../db/schema";
 import { PURGE_AFTER_DAYS, REVIEW_SLA_HOURS } from "../lib/policy";
 import { audit } from "./audit";
+import { dispatchPendingNotificationEmails, isDigestDay, sendWeeklyDigests } from "./email-notify";
 import { notifyAdmins } from "./notifications";
 import { removeStoredFile } from "./storage";
 
@@ -31,6 +32,8 @@ export type MaintenanceReport = {
   purgedFiles: number;
   purgedWithdrawn: number;
   overdueNotified: number;
+  notificationEmails: number;
+  digests: number;
   expired: { sessions: number; challenges: number; tokens: number; rateLimits: number; mails: number };
 };
 
@@ -109,6 +112,10 @@ export async function runDailyMaintenance(db: Db, now = new Date()): Promise<Mai
     mails: (await db.delete(mailOutbox).where(lt(mailOutbox.createdAt, cutoff)).returning({ id: mailOutbox.id })).length,
   };
 
+  // 6) メール：送り残したお知らせと、月曜なら週 1 回のまとめ
+  const notificationEmails = await dispatchPendingNotificationEmails(db, now);
+  const digests = isDigestDay(now) ? await sendWeeklyDigests(db, now) : 0;
+
   // 画像ファイルは DB から消し終えてから消す（ファイルだけ消えて行が残る、を避ける）
   for (const f of doomedFiles) await removeStoredFile(f.key).catch(() => undefined);
 
@@ -118,6 +125,8 @@ export async function runDailyMaintenance(db: Db, now = new Date()): Promise<Mai
     purgedFiles: doomedFiles.length,
     purgedWithdrawn,
     overdueNotified: overdue.length,
+    notificationEmails,
+    digests,
     expired,
   };
   await audit(db, { actorId: null, action: "system.maintenance", targetType: "system", meta: report });

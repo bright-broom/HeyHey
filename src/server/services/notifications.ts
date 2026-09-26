@@ -43,6 +43,9 @@ export async function notify(
     postId: n.postId ?? null,
     data: n.data ?? {},
   });
+  // メールでも知らせる種類なら、応答を返した後に送る（循環参照を避けて遅延読み込み）
+  const { EMAIL_NOTIFICATION_TYPES, scheduleNotificationEmail } = await import("./email-notify");
+  if (EMAIL_NOTIFICATION_TYPES.includes(n.type)) await scheduleNotificationEmail(n.userId);
 }
 
 /** 管理者全員に通知（新規申請・新規通報） */
