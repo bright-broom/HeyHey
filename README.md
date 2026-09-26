@@ -41,6 +41,7 @@ npm run dev       # http://localhost:3000
 メール送信サービスを設定していない間は、送ったメールを http://localhost:3000/dev/mail で確認できます。
 
 > `npm run dev` の実行中に `npm run db:seed` などを同時に動かさないでください。PGlite は 1 プロセスからしか開けません。
+> `vercel env pull` で `.env.local` に本番の値が入っていても、開発サーバーは本番の DB と Blob を使わず、ローカルの PGlite とディスクを使います（どうしてもつなぐときだけ `ALLOW_REMOTE_IN_DEV=1`）。E2E も `.env` ファイルの値をすべて空にしてから起動します。
 > データを初期化したいときは、サーバーを止めて `.data/` を削除し、`npm run demo` をやり直します。
 
 ## 本番（Vercel）

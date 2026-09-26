@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync, randomBytes } from "node:crypto";
+import { databaseUrl } from "./env";
 
 /**
  * DB に置く秘密（2 段階認証の鍵）の暗号化。AES-256-GCM。
@@ -27,7 +28,7 @@ function key(): Buffer {
   }
   // 本番（Vercel、または実際の PostgreSQL につないでいる環境）で鍵を置き忘れたまま、
   // 誰でも知っている開発用の鍵で暗号化してしまうことを防ぐ。開発用の鍵はローカルの PGlite 専用
-  if (process.env.VERCEL || process.env.DATABASE_URL) throw new MissingKeyError();
+  if (process.env.VERCEL || databaseUrl()) throw new MissingKeyError();
   return DEV_KEY;
 }
 

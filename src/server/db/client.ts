@@ -2,6 +2,7 @@ import "server-only";
 import path from "node:path";
 import fs from "node:fs";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+import { databaseUrl } from "../lib/env";
 import * as schema from "./schema";
 
 /**
@@ -22,7 +23,10 @@ const holder: Holder = (g.__kakomiDb ??= {});
 const MIGRATIONS_DIR = path.join(/*turbopackIgnore: true*/ process.cwd(), "drizzle");
 
 async function open(): Promise<Db> {
-  const url = process.env.DATABASE_URL;
+  const url = databaseUrl();
+  if (!url && process.env.DATABASE_URL) {
+    console.warn("[db] 開発サーバーでは .env.local のリモート DB を使わず、ローカルの PGlite を使います（ALLOW_REMOTE_IN_DEV=1 で変更可）");
+  }
   if (url) {
     const { Pool } = await import("pg");
     const { drizzle } = await import("drizzle-orm/node-postgres");

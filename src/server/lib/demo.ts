@@ -1,4 +1,4 @@
-import { isHttps } from "./env";
+import { databaseUrl, isHttps } from "./env";
 
 /**
  * デモアカウントの台帳。シード（scripts/seed.ts --demo）とログイン画面のデモ一覧の両方がここを読む。
@@ -56,8 +56,8 @@ export const isDemoEmail = (email: string) => DEMO_ACCOUNTS.some((a) => a.email 
 /**
  * デモログイン（パスワードも 2 段階認証も省く）を使えるか。ローカルの PGlite で開発しているときだけ。
  * 認証をまるごと飛ばす機能なので、環境変数で有効にする抜け道は作らない。
- * 本番（production ビルド・Vercel・実 DB・https）のどれかに当てはまれば必ず無効。
+ * 本番（production ビルド・Vercel・実際につなぐ PostgreSQL・https）のどれかに当てはまれば必ず無効。
  */
 export function demoLoginEnabled(): boolean {
-  return process.env.NODE_ENV !== "production" && !process.env.VERCEL && !process.env.DATABASE_URL && !isHttps();
+  return process.env.NODE_ENV !== "production" && !process.env.VERCEL && !databaseUrl() && !isHttps();
 }

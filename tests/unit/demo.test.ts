@@ -14,7 +14,7 @@ beforeAll(async () => {
 });
 
 // test:pg では DATABASE_URL が入っているので、「ローカル開発」の条件を作ってから確かめる（接続は開いたまま）
-const ENV_KEYS = ["NODE_ENV", "VERCEL", "DATABASE_URL", "APP_URL"] as const;
+const ENV_KEYS = ["NODE_ENV", "VERCEL", "DATABASE_URL", "APP_URL", "ALLOW_REMOTE_IN_DEV"] as const;
 let saved: Record<string, string | undefined> = {};
 beforeEach(() => {
   saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
@@ -84,7 +84,9 @@ describe("デモログイン", () => {
   it.each([
     ["production ビルド", () => ((process.env as Record<string, string>).NODE_ENV = "production")],
     ["Vercel", () => (process.env.VERCEL = "1")],
-    ["実際の PostgreSQL", () => (process.env.DATABASE_URL = "postgres://example")],
+    // 開発サーバーは .env.local のリモート DB を無視して PGlite を使う。実際にリモートへつなぐ設定のときは無効
+    ["実際の PostgreSQL", () => Object.assign(process.env, { DATABASE_URL: "postgres://db.example.com/kakomi", ALLOW_REMOTE_IN_DEV: "1" })],
+    ["手元の PostgreSQL", () => (process.env.DATABASE_URL = "postgres://postgres@localhost:5432/kakomi")],
     ["https の公開 URL", () => (process.env.APP_URL = "https://kakomi.example")],
   ])("%s では無効（画面にも出さず、呼ばれても not_found）", async (_, arrange) => {
     await demoUser("sato@example.com");

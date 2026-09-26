@@ -1,6 +1,7 @@
 import "server-only";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { blobEnabled } from "../lib/env";
 
 /**
  * 画像ファイルの置き場所。
@@ -8,7 +9,7 @@ import path from "node:path";
  *   直接は読めず、必ずアプリの /api/media（ログイン・公開範囲チェック付き）を通る
  * - なければローカルディスク（UPLOAD_DIR、既定 .data/uploads）
  */
-const useBlob = () => !!(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
+const useBlob = blobEnabled;
 const KEY_RE = /^[0-9a-f-]{36}\.webp$/;
 const blobPath = (key: string) => `media/${key}`;
 

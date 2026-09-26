@@ -5,6 +5,20 @@ const PORT = 3200;
 // クラウド環境などで Playwright 同梱の Chromium と版が合わないときは、既存の Chromium を使う
 const localChromium = ["/opt/pw-browsers/chromium-1194/chrome-linux/chrome"].find((p) => fs.existsSync(p));
 
+/**
+ * next start は .env.production.local などを読み込むので、`vercel env pull` した本番の値
+ * （DATABASE_URL・BLOB_READ_WRITE_TOKEN・VERCEL=1 など）がそのままテストに入り、本番の DB に
+ * つながってしまう。.env ファイルにあるキーはすべて空で上書きし、テストに本番の値を 1 つも渡さない
+ * （Next は、すでに環境変数にあるキーを .env ファイルで上書きしない）。
+ */
+const envFileKeys = fs
+  .readdirSync(".")
+  .filter((f) => /^\.env(\..+)?$/.test(f) && f !== ".env.example")
+  .flatMap((f) => fs.readFileSync(f, "utf8").split("\n"))
+  .map((line) => line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/)?.[1])
+  .filter((k): k is string => !!k);
+const blanked = Object.fromEntries(envFileKeys.map((k) => [k, ""]));
+
 export default defineConfig({
   testDir: "tests/e2e",
   timeout: 60_000,
@@ -26,6 +40,14 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 120_000,
     env: {
+      ...blanked,
+      // 念のため、本番につながる値は .env ファイルの有無にかかわらず空にする
+      DATABASE_URL: "",
+      DATABASE_URL_UNPOOLED: "",
+      BLOB_READ_WRITE_TOKEN: "",
+      RESEND_API_KEY: "",
+      VERCEL: "",
+      EMAIL_VERIFICATION: "",
       PGLITE_DIR: ".data/e2e/pglite",
       UPLOAD_DIR: ".data/e2e/uploads",
       APP_URL: `http://localhost:${PORT}`,
