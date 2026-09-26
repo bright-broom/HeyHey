@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { acceptTermsAction } from "@/app/actions/auth";
 import { SubmitButton } from "@/components/SubmitButton";
 import { getViewer, homeFor } from "@/server/web/session";
-import { TermsBody } from "../terms/page";
+import { TermsBody } from "@/components/TermsBody";
 
 export const metadata = { title: "ようこそ" };
 
