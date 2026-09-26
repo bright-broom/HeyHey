@@ -220,6 +220,9 @@ test("パスワードを忘れても、メールのリンクから再設定し�
   const p = await newPage(browser);
   await p.goto("/login");
   await p.getByRole("link", { name: "パスワードを忘れた方" }).click();
+  // ログイン画面にも同じ「メールアドレス」欄があるので、再設定の画面に切り替わってから入力する
+  await expect(p).toHaveURL("/forgot");
+  await expect(p.getByRole("heading", { name: "パスワードの再設定" })).toBeVisible();
   await p.getByLabel("メールアドレス").fill(NEWBIE.email);
   await p.getByRole("button", { name: "再設定のメールを送る" }).click();
   await expect(p.getByText("登録済みのアドレスであれば")).toBeVisible();
