@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
-import { blockedBetween, visiblePost } from "../lib/visibility";
+import { blockedBetween, visibleComment, visiblePost } from "../lib/visibility";
 import type { Db, DbOrTx } from "../db/client";
 import { notifications, users } from "../db/schema";
 import { assertMember } from "../lib/policy";
@@ -61,9 +61,11 @@ export async function notifyAdmins(
  * 投稿にひもづく通知は、いまその投稿が見える場合だけ出す
  * （友達解除・非表示・削除の後に、見えない投稿の存在や相手の名前が通知から漏れないように）
  */
-function stillVisible(viewerId: string) {
+export function stillVisible(viewerId: string) {
   return and(
     or(isNull(notifications.postId), sql`EXISTS (SELECT 1 FROM posts WHERE posts.id = ${notifications.postId} AND ${visiblePost(viewerId)})`),
+    // コメントを指す通知（コメントでのメンション）は、そのコメントがいま見える場合だけ
+    sql`(${notifications.data}->>'commentId' IS NULL OR EXISTS (SELECT 1 FROM comments WHERE comments.id::text = ${notifications.data}->>'commentId' AND ${visibleComment(viewerId)}))`,
     // 後からブロック・ミュートした相手の通知も出さない
     or(
       isNull(notifications.actorId),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractMentionIds, extractTags, mentionToken, resolveMentions, tokenize } from "@/lib/richtext";
+import { extractMentionIds, extractTags, maskHiddenMentions, mentionToken, resolveMentions, tokenize, unmaskHiddenMentions } from "@/lib/richtext";
 
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
@@ -34,5 +34,19 @@ describe("メンションとハッシュタグの読み取り", () => {
     expect(out).toBe(`${mentionToken("本当の名前", A)} @メンバー`);
     expect(out).not.toContain(B);
     expect(out).not.toContain("ブロック相手");
+  });
+});
+
+describe("編集画面での、見えない相手へのメンション", () => {
+  it("名前も ID も出さずに目印にし、保存時に元のメンションへ戻す。消した目印は戻さない", () => {
+    const stored = `${mentionToken("見える人", A)} と ${mentionToken("見えない人", B)}`;
+    const names = new Map([[A, "見える人"], [B, null]]);
+    const masked = maskHiddenMentions(stored, names);
+    expect(masked).toBe(`${mentionToken("見える人", A)} と @[メンバー](h:0)`);
+    expect(masked).not.toContain(B);
+    expect(unmaskHiddenMentions(`${masked} 追記`, stored, names)).toBe(`${stored} 追記`);
+    expect(unmaskHiddenMentions(mentionToken("見える人", A), stored, names)).toBe(mentionToken("見える人", A));
+    // 目印を書き換えて別の番号を指しても、存在しない番号はただの文字になる
+    expect(unmaskHiddenMentions("@[メンバー](h:9)", stored, names)).toBe("@メンバー");
   });
 });

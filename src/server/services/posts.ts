@@ -4,7 +4,7 @@ import type { Db, DbOrTx } from "../db/client";
 import { comments, media, notifications, postTags, posts, profiles, reactions, users } from "../db/schema";
 import { AppError, forbidden, invalid, notFound } from "../lib/errors";
 import { assertMember } from "../lib/policy";
-import { extractMentionIds, extractTags, MENTION_RE, resolveMentions } from "../../lib/richtext";
+import { extractMentionIds, extractTags, maskHiddenMentions, MENTION_RE, resolveMentions, unmaskHiddenMentions } from "../../lib/richtext";
 import { blockedBetween, visibleComment, visiblePost } from "../lib/visibility";
 import type { Viewer } from "../lib/viewer";
 import { MAX_IMAGES_PER_POST, processImage, removeStoredFile, type ProcessedImage } from "./media";
@@ -66,6 +66,19 @@ async function loadAuthors(db: Db, ids: string[]): Promise<Map<string, AuthorDTO
  * 本文中のメンションを、viewer から見た現在の名前に置き換える。見えない相手（ブロック関係・停止・退会）は
  * 「@メンバー」にして、名前も ID もブラウザに送らない。
  */
+async function mentionNames(db: DbOrTx, viewer: Viewer, bodies: string[]): Promise<Map<string, string | null>> {
+  const ids = [...new Set(bodies.flatMap((b) => [...b.matchAll(MENTION_RE)].map((m) => m[2]!)))];
+  const names = new Map<string, string | null>(ids.map((id) => [id, null]));
+  if (ids.length) {
+    const rows = await db
+      .select({ id: users.id, displayName: users.displayName })
+      .from(users)
+      .where(and(inArray(users.id, ids), eq(users.status, "active"), sql`(${users.id} = ${viewer.id} OR NOT ${blockedBetween(viewer.id, sql`${users.id}`)})`));
+    for (const r of rows) names.set(r.id, r.displayName);
+  }
+  return names;
+}
+
 async function resolveBodies(db: Db, viewer: Viewer, bodies: string[]): Promise<(body: string) => string> {
   const ids = [...new Set(bodies.flatMap((b) => [...b.matchAll(MENTION_RE)].map((m) => m[2]!)))];
   const names = new Map<string, string | null>(ids.map((id) => [id, null]));
@@ -207,6 +220,14 @@ export async function listFeed(db: Db, viewer: Viewer, opts: { before?: Date | n
   return { posts: await hydrate(db, viewer, page, "feed"), nextBefore: hasMore ? page.at(-1)!.createdAt : null };
 }
 
+/** 編集用の本文（自分の投稿だけ）。見えない相手へのメンションは目印にして渡す */
+export async function getPostForEdit(db: Db, viewer: Viewer, postId: string) {
+  assertMember(viewer);
+  const p = await ownPost(db, viewer, postId).catch(() => null);
+  if (!p) return null;
+  return { id: p.id, visibility: p.visibility, body: maskHiddenMentions(p.body, await mentionNames(db, viewer, [p.body])) };
+}
+
 export async function getPost(db: Db, viewer: Viewer, postId: string): Promise<PostDTO | null> {
   assertMember(viewer);
   if (!z.uuid().safeParse(postId).success) return null;
@@ -222,7 +243,7 @@ export async function getPost(db: Db, viewer: Viewer, postId: string): Promise<P
  * （「友達のみ」の投稿で友達でない人をメンションしても、存在を知らせない）。
  * ブロック・ミュートは notify() が見る。skip は、すでに別の通知（コメント・返信）を送った人。
  */
-async function notifyMentions(db: DbOrTx, viewer: Viewer, postId: string, ids: string[], skip: string[] = []) {
+async function notifyMentions(db: DbOrTx, viewer: Viewer, postId: string, ids: string[], skip: string[] = [], commentId?: string) {
   const targets = ids.filter((id) => id !== viewer.id && !skip.includes(id));
   if (!targets.length) return;
   const reachable = await db
@@ -234,9 +255,13 @@ async function notifyMentions(db: DbOrTx, viewer: Viewer, postId: string, ids: s
         eq(users.status, "active"),
         sql`${users.termsAcceptedAt} IS NOT NULL`,
         sql`EXISTS (SELECT 1 FROM posts WHERE posts.id = ${postId} AND ${visiblePost(sql`${users.id}`)})`,
+        // コメントでのメンションは、そのコメント（と返信先）が見える人にだけ
+        commentId ? sql`EXISTS (SELECT 1 FROM comments WHERE comments.id = ${commentId} AND ${visibleComment(sql`${users.id}`)})` : undefined,
       ),
     );
-  for (const r of reachable) await notify(db, { userId: r.id, type: "mention", actorId: viewer.id, postId });
+  for (const r of reachable) {
+    await notify(db, { userId: r.id, type: "mention", actorId: viewer.id, postId, data: commentId ? { commentId } : {} });
+  }
 }
 
 async function saveTags(db: DbOrTx, postId: string, body: string) {
@@ -320,7 +345,8 @@ export async function updatePost(db: Db, viewer: Viewer, postId: string, input: 
   const p = await ownPost(db, viewer, postId);
   const parsed = postSchema.safeParse(input);
   if (!parsed.success) throw invalid(parsed.error.issues[0]?.message ?? "入力内容を確認してください。");
-  const body = parsed.data.body.trim();
+  // 編集画面では見えない相手へのメンションを目印にしてあるので、保存前に元のメンションへ戻す
+  const body = unmaskHiddenMentions(parsed.data.body.trim(), p.body, await mentionNames(db, viewer, [p.body]));
   const [{ n } = { n: 0 }] = await db.select({ n: sql<number>`count(*)::int` }).from(media).where(eq(media.postId, p.id));
   if (!body && n === 0) throw invalid("本文を入れてください。");
   await db.transaction(async (tx) => {
@@ -377,7 +403,7 @@ export async function addComment(db: Db, viewer: Viewer, input: { postId: string
     if (parent && parent.authorId !== post.authorId) {
       await notify(tx, { userId: parent.authorId, type: "reply", actorId: viewer.id, postId: post.id });
     }
-    await notifyMentions(tx, viewer, post.id, extractMentionIds(body), [post.authorId, ...(parent ? [parent.authorId] : [])]);
+    await notifyMentions(tx, viewer, post.id, extractMentionIds(body), [post.authorId, ...(parent ? [parent.authorId] : [])], c!.id);
     return { id: c!.id };
   });
 }

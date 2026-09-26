@@ -1,10 +1,12 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "@/server/db/client";
-import { notifications, users } from "@/server/db/schema";
+import { notifications, posts, users } from "@/server/db/schema";
 import { mentionToken } from "@/lib/richtext";
 import { blockUser } from "@/server/services/blocks";
-import { addComment, createPost, getPost, listFeed, updatePost } from "@/server/services/posts";
+import { listNotifications } from "@/server/services/notifications";
+import { addComment, createPost, getPost, getPostForEdit, listFeed, updatePost } from "@/server/services/posts";
+import { createReport, resolveCase } from "@/server/services/reports";
 import { befriend, db, makeUser } from "./helpers";
 
 let d: Db;
@@ -92,6 +94,47 @@ describe("メンション", () => {
     await createPost(d, a.viewer, { body: people.map((p) => mentionToken("x", p.user.id)).join(" "), visibility: "members" });
     const counts = await Promise.all(people.map(async (p) => (await mentionsOf(p.user.id)).length));
     expect(counts.reduce((s, n) => s + n, 0)).toBe(10);
+  });
+});
+
+describe("メンションのレビュー指摘の回帰", () => {
+  it("コメントでのメンションは、そのコメントが見えない人には通知しない（ブロックした相手のコメントへの返信）", async () => {
+    const a = await makeUser(d);
+    const b = await makeUser(d);
+    const c = await makeUser(d);
+    const { id } = await createPost(d, c.viewer, { body: "C の投稿", visibility: "members" });
+    const bComment = await addComment(d, b.viewer, { postId: id, body: "B のコメント" });
+    await blockUser(d, a.viewer, b.user.id);
+    await addComment(d, c.viewer, { postId: id, body: `${mentionToken("A", a.user.id)} どう思う？`, parentId: bComment.id });
+    expect(await mentionsOf(a.user.id)).toHaveLength(0);
+  });
+
+  it("通知の後でコメントが見えなくなったら、通知の一覧からも消える", async () => {
+    const admin = await makeUser(d, { role: "admin" });
+    const a = await makeUser(d);
+    const c = await makeUser(d);
+    const reporter = await makeUser(d);
+    const { id } = await createPost(d, c.viewer, { body: "C の投稿", visibility: "members" });
+    const comment = await addComment(d, c.viewer, { postId: id, body: `${mentionToken("A", a.user.id)} へ` });
+    expect((await listNotifications(d, a.viewer)).filter((n) => n.type === "mention")).toHaveLength(1);
+    await createReport(d, reporter.viewer, { targetType: "comment", targetId: comment.id, reason: "spam" });
+    await resolveCase(d, admin.viewer, { targetType: "comment", targetId: comment.id, resolution: "hidden" });
+    expect((await listNotifications(d, a.viewer)).filter((n) => n.type === "mention")).toHaveLength(0);
+  });
+
+  it("編集しても、見えない相手へのメンションは消えない（編集画面には名前も ID も出さない）", async () => {
+    const a = await makeUser(d);
+    const b = await makeUser(d);
+    const { id } = await createPost(d, a.viewer, { body: `${mentionToken("B", b.user.id)} へ`, visibility: "members" });
+    await blockUser(d, b.viewer, a.user.id);
+    const edit = await getPostForEdit(d, a.viewer, id);
+    expect(edit!.body).toBe("@[メンバー](h:0) へ");
+    await updatePost(d, a.viewer, id, { body: `${edit!.body} 追記`, visibility: "members" });
+    const [row] = await d.select({ body: posts.body }).from(posts).where(eq(posts.id, id));
+    expect(row!.body).toBe(`${mentionToken("B", b.user.id)} へ 追記`);
+    // 他人の投稿は編集用に取り出せない
+    const other = await makeUser(d);
+    expect(await getPostForEdit(d, other.viewer, id)).toBeNull();
   });
 });
 

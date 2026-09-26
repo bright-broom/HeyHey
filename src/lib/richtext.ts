@@ -63,3 +63,24 @@ export function resolveMentions(body: string, names: Map<string, string | null>)
     return name ? mentionToken(name, id) : "@メンバー";
   });
 }
+
+/** 編集画面用の目印。MENTION_RE には当たらないので、表示やメンションの抽出には使われない */
+const HIDDEN_RE = /@\[メンバー\]\(h:(\d{1,2})\)/g;
+
+/**
+ * 編集画面に渡す本文。いま見えない相手へのメンションは、名前も ID も出さずに
+ * 番号付きの目印（@[メンバー](h:0)）にする。保存時に unmaskHiddenMentions で元に戻す。
+ */
+export function maskHiddenMentions(body: string, names: Map<string, string | null>): string {
+  let i = 0;
+  return body.replace(MENTION_RE, (_all, _name, id: string) => {
+    const name = names.get(id);
+    return name ? mentionToken(name, id) : `@[メンバー](h:${i++})`;
+  });
+}
+
+/** 編集後の本文の目印を、保存済みの本文にあった元のメンションに戻す（残された目印の分だけ） */
+export function unmaskHiddenMentions(edited: string, stored: string, names: Map<string, string | null>): string {
+  const hidden = [...stored.matchAll(MENTION_RE)].filter((m) => !names.get(m[2]!)).map((m) => m[0]);
+  return edited.replace(HIDDEN_RE, (all, n: string) => hidden[Number(n)] ?? "@メンバー");
+}
