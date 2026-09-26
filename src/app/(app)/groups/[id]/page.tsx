@@ -6,7 +6,7 @@ import { Composer } from "@/components/Composer";
 import { PostCard } from "@/components/PostCard";
 import { getDb } from "@/server/db/client";
 import { AppError } from "@/server/lib/errors";
-import { getGroup, listGroupMembers } from "@/server/services/groups";
+import { getGroup, listGroupBans, listGroupMembers } from "@/server/services/groups";
 import { listFeed } from "@/server/services/posts";
 import { requireMember } from "@/server/web/session";
 import { GroupForm } from "../GroupForm";
@@ -38,9 +38,10 @@ export default async function GroupPage(props: PageProps<"/groups/[id]">) {
   const active = group.me?.status === "active";
   const sp = await props.searchParams;
   const before = typeof sp.before === "string" ? new Date(sp.before) : null;
-  const [feed, members] = await Promise.all([
+  const [feed, members, bans] = await Promise.all([
     active ? listFeed(db, viewer, { groupId: group.id, before }) : null,
-    active ? listGroupMembers(db, viewer, group.id) : null,
+    active || group.adminView ? listGroupMembers(db, viewer, group.id) : null,
+    group.canManage ? listGroupBans(db, viewer, group.id) : null,
   ]);
 
   return (
@@ -115,6 +116,11 @@ export default async function GroupPage(props: PageProps<"/groups/[id]">) {
                     </Link>
                     {ROLE_LABEL[m.role] && <span className="text-[11px] tracking-[0.06em] text-muted">{ROLE_LABEL[m.role]}</span>}
                   </div>
+                  {group.adminView && !group.isOwner && m.role !== "owner" && (
+                    <div className="mt-1 pl-10">
+                      <Op groupId={group.id} op="assign_owner" userId={m.id} label="オーナーに指定（サイト管理者）" />
+                    </div>
+                  )}
                   {group.canManage && m.id !== viewer.id && m.role !== "owner" && (
                     <details className="mt-1 pl-10 text-xs text-muted">
                       <summary className="cursor-pointer list-none hover:text-ink">管理</summary>
@@ -131,6 +137,20 @@ export default async function GroupPage(props: PageProps<"/groups/[id]">) {
             </ul>
           </section>
 
+          {bans && bans.length > 0 && (
+            <section aria-labelledby="bans">
+              <h2 id="bans" className="plaque">REMOVED · {bans.length}</h2>
+              <ul className="mt-3 divide-y divide-line border-y border-line">
+                {bans.map((b) => (
+                  <li key={b.id} className="flex items-center gap-3 py-3 text-sm">
+                    <span className="min-w-0 flex-1 truncate text-muted">{b.displayName}</span>
+                    <Op groupId={group.id} op="unban" userId={b.id} label="除外を解除" />
+                  </li>
+                ))}
+              </ul>
+              <p className="hint">外した人は、解除するまで参加も申請もできません。</p>
+            </section>
+          )}
           {group.canManage && (
             <details className="text-sm">
               <summary className="plaque cursor-pointer list-none hover:text-ink">SETTINGS</summary>

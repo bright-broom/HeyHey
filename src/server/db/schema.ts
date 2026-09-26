@@ -246,6 +246,22 @@ export const groupMembers = pgTable(
   (t) => [primaryKey({ columns: [t.groupId, t.userId] }), index("group_members_user_idx").on(t.userId)],
 );
 
+/** グループから外された人。管理役が解除するまで、参加も申請もできない */
+export const groupBans = pgTable(
+  "group_bans",
+  {
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => groups.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    bannedById: uuid("banned_by_id").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.groupId, t.userId] })],
+);
+
 export const posts = pgTable(
   "posts",
   {

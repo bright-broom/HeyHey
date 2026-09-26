@@ -17,7 +17,9 @@ import {
   setGroupArchived,
   setMemberRole,
   transferGroupOwnership,
+  unbanMember,
   updateGroup,
+  assignGroupOwnerByAdmin,
 } from "@/server/services/groups";
 import { mediaForViewer } from "@/server/services/media";
 import { withdraw } from "@/server/services/members";
@@ -82,7 +84,7 @@ describe("グループの投稿は、アクティブなメンバーにだけ見�
     expect(row!.visibility).toBe("members");
   });
 
-  it("退出・除外されると見えなくなる。自分の投稿は自分には見える", async () => {
+  it("外されると、自分の投稿も含めて見えず、書き込めない。参加自由でも、解除されるまで入り直せない", async () => {
     const owner = await makeUser(d);
     const member = await makeUser(d);
     const { id: gid } = await newGroup(owner);
@@ -90,9 +92,29 @@ describe("グループの投稿は、アクティブなメンバーにだけ見�
     const { id: mine } = await createPost(d, member.viewer, { body: "自分の投稿", visibility: "members", groupId: gid });
     const { id: others } = await createPost(d, owner.viewer, { body: "オーナーの投稿", visibility: "members", groupId: gid });
     await removeMember(d, owner.viewer, gid, member.user.id);
+
     expect(await getPost(d, member.viewer, others)).toBeNull();
-    expect(await getPost(d, member.viewer, mine)).not.toBeNull();
+    // 自分の投稿を入口に、その後のやりとりを読み書きさせない
+    await addComment(d, owner.viewer, { postId: mine, body: "外した後のコメント" });
+    expect(await getPost(d, member.viewer, mine)).toBeNull();
+    await expect(addComment(d, member.viewer, { postId: mine, body: "x" })).rejects.toMatchObject({ code: "not_found" });
+    await expect(toggleReaction(d, member.viewer, { postId: mine }, "like")).rejects.toMatchObject({ code: "not_found" });
+    expect(await d.select().from(notifications).where(and(eq(notifications.userId, member.user.id), eq(notifications.type, "comment")))).toHaveLength(0);
     await expect(listGroupMembers(d, member.viewer, gid)).rejects.toMatchObject({ code: "not_found" });
+
+    await expect(joinGroup(d, member.viewer, gid)).rejects.toMatchObject({ code: "forbidden" });
+    await unbanMember(d, owner.viewer, gid, member.user.id);
+    expect(await joinGroup(d, member.viewer, gid)).toBe("joined");
+    expect(await getPost(d, member.viewer, mine)).not.toBeNull();
+  });
+
+  it("自分から退出した人は、また参加できる", async () => {
+    const owner = await makeUser(d);
+    const member = await makeUser(d);
+    const { id: gid } = await newGroup(owner);
+    await joinGroup(d, member.viewer, gid);
+    await leaveGroup(d, member.viewer, gid);
+    expect(await joinGroup(d, member.viewer, gid)).toBe("joined");
   });
 
   it("同じグループでも、ブロックし合う人の投稿とメンバー表示は見えない。停止中の人の投稿も隠れる", async () => {
@@ -190,6 +212,8 @@ describe("グループの管理", () => {
     await expect(setGroupArchived(d, member.viewer, gid, true)).rejects.toMatchObject({ code: "forbidden" });
     await setGroupArchived(d, admin.viewer, gid, true);
     expect(await getPost(d, member.viewer, id)).toBeNull();
+    // 閉じたグループでは、投稿者本人にも見えない
+    expect(await getPost(d, owner.viewer, id)).toBeNull();
     await expect(createPost(d, member.viewer, { body: "x", visibility: "members", groupId: gid })).rejects.toMatchObject({ code: "not_found" });
     expect((await getGroup(d, member.viewer, gid)).archived).toBe(true);
     await expect(getGroup(d, outsider.viewer, gid)).rejects.toMatchObject({ code: "not_found" });
@@ -199,12 +223,50 @@ describe("グループの管理", () => {
     expect(await getPost(d, member.viewer, id)).not.toBeNull();
   });
 
-  it("閉じていないグループのオーナーは、先に移さないと退会できない", async () => {
+  it("グループのオーナーは、閉じたグループでも、先に移さないと退会できない", async () => {
     const owner = await makeUser(d);
+    const member = await makeUser(d);
     const { id: gid } = await newGroup(owner);
+    await joinGroup(d, member.viewer, gid);
     await expect(withdraw(d, owner.viewer, { password: PASSWORD, mode: "anonymize" })).rejects.toMatchObject({ code: "invalid" });
     await setGroupArchived(d, owner.viewer, gid, true);
+    await expect(withdraw(d, owner.viewer, { password: PASSWORD, mode: "anonymize" })).rejects.toMatchObject({ code: "invalid" });
+    await setGroupArchived(d, owner.viewer, gid, false);
+    await transferGroupOwnership(d, owner.viewer, gid, member.user.id);
     await withdraw(d, owner.viewer, { password: PASSWORD, mode: "anonymize" });
     expect(await d.select().from(groupMembers).where(eq(groupMembers.userId, owner.user.id))).toHaveLength(0);
+  });
+
+  it("オーナーが停止されても、サイトの管理者がオーナーを指定し直せる。オーナーのいないグループは再開できない", async () => {
+    const owner = await makeUser(d);
+    const member = await makeUser(d);
+    const admin = await makeUser(d, { role: "admin" });
+    const plain = await makeUser(d);
+    const { id: gid } = await newGroup(owner);
+    await joinGroup(d, member.viewer, gid);
+    await setGroupArchived(d, owner.viewer, gid, true);
+    await d.update(users).set({ status: "suspended" }).where(eq(users.id, owner.user.id));
+
+    await expect(setGroupArchived(d, admin.viewer, gid, false)).rejects.toMatchObject({ code: "conflict" });
+    await expect(assignGroupOwnerByAdmin(d, plain.viewer, gid, member.user.id)).rejects.toMatchObject({ code: "forbidden" });
+    expect((await listGroupMembers(d, admin.viewer, gid)).active.map((m) => m.id)).toContain(member.user.id);
+    await assignGroupOwnerByAdmin(d, admin.viewer, gid, member.user.id);
+    const roles = Object.fromEntries((await d.select().from(groupMembers).where(eq(groupMembers.groupId, gid))).map((r) => [r.userId, r.role]));
+    expect(roles[member.user.id]).toBe("owner");
+    expect(roles[owner.user.id]).toBe("moderator");
+    await setGroupArchived(d, admin.viewer, gid, false);
+    expect((await getGroup(d, member.viewer, gid)).isOwner).toBe(true);
+  });
+
+  it("役割の書き換えはオーナーの行に及ばない（同時に移譲された場合も）", async () => {
+    const owner = await makeUser(d);
+    const m1 = await makeUser(d);
+    const { id: gid } = await newGroup(owner);
+    await joinGroup(d, m1.viewer, gid);
+    await transferGroupOwnership(d, owner.viewer, gid, m1.user.id);
+    // 移譲の直後に、古い情報のまま元オーナー（いまはモデレーター）が新オーナーを外そうとしても外れない
+    await expect(removeMember(d, owner.viewer, gid, m1.user.id)).rejects.toMatchObject({ code: "forbidden" });
+    await expect(setMemberRole(d, owner.viewer, gid, m1.user.id, "member")).rejects.toMatchObject({ code: "forbidden" });
+    expect(Object.fromEntries((await d.select().from(groupMembers).where(eq(groupMembers.groupId, gid))).map((r) => [r.userId, r.role]))[m1.user.id]).toBe("owner");
   });
 });

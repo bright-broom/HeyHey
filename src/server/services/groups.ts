@@ -1,7 +1,7 @@
-import { and, asc, count, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db, DbOrTx } from "../db/client";
-import { groupMembers, groups, profiles, users } from "../db/schema";
+import { groupBans, groupMembers, groups, profiles, users } from "../db/schema";
 import { AppError, conflict, forbidden, invalid, notFound } from "../lib/errors";
 import { assertMember, isAdmin } from "../lib/policy";
 import type { Viewer } from "../lib/viewer";
@@ -117,6 +117,8 @@ export async function getGroup(db: Db, viewer: Viewer, groupId: string) {
     canManage: isManager(me) && !g.archivedAt,
     isOwner: active && me?.role === "owner",
     canArchive: (active && me?.role === "owner") || isAdmin(viewer),
+    /** サイトの管理者は、メンバー一覧を見てオーナーを指定し直せる（グループの投稿は見えない） */
+    adminView: isAdmin(viewer),
   };
 }
 
@@ -124,7 +126,7 @@ export async function getGroup(db: Db, viewer: Viewer, groupId: string) {
 export async function listGroupMembers(db: Db, viewer: Viewer, groupId: string) {
   assertMember(viewer);
   const { g, me } = await loadGroup(db, viewer, groupId);
-  if (me?.status !== "active") throw notFound("グループが見つかりません。");
+  if (me?.status !== "active" && !isAdmin(viewer)) throw notFound("グループが見つかりません。");
   const rows = await db
     .select({ id: users.id, displayName: users.displayName, avatarMediaId: profiles.avatarMediaId, role: groupMembers.role, status: groupMembers.status, since: groupMembers.createdAt })
     .from(groupMembers)
@@ -149,6 +151,8 @@ export async function joinGroup(db: Db, viewer: Viewer, groupId: string): Promis
   const { g, me } = await loadGroup(db, viewer, groupId);
   if (g.archivedAt) throw conflict("このグループは閉じられています。");
   if (me) return me.status === "active" ? "joined" : "requested";
+  const [banned] = await db.select({ one: sql`1` }).from(groupBans).where(and(eq(groupBans.groupId, g.id), eq(groupBans.userId, viewer.id)));
+  if (banned) throw forbidden("このグループには参加できません。");
   if (!(await consume(db, `group:join:${viewer.id}`, 30, 60 * 60))) {
     throw new AppError("rate_limited", "短時間の操作が多すぎます。少し時間をおいてください。");
   }
@@ -217,8 +221,37 @@ export async function removeMember(db: Db, viewer: Viewer, groupId: string, user
   const t = await targetMembership(db, g.id, userId);
   if (t.role === "owner") throw forbidden("オーナーは外せません。");
   if (t.role === "moderator" && me.role !== "owner") throw forbidden("モデレーターを外せるのはオーナーだけです。");
-  await db.delete(groupMembers).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.userId, userId)));
-  await audit(db, { actorId: viewer.id, action: "group.remove_member", targetType: "group", targetId: g.id, meta: { userId } });
+  await db.transaction(async (tx) => {
+    // 確認した役割のままのときだけ外す（同時にオーナーを移された人を外してしまわないように）
+    const allowed = me.role === "owner" ? ["member", "moderator"] : ["member"];
+    const [gone] = await tx
+      .delete(groupMembers)
+      .where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.userId, userId), inArray(groupMembers.role, allowed as GroupRole[])))
+      .returning({ userId: groupMembers.userId });
+    if (!gone) throw conflict("相手の役割が変わったため、外せませんでした。");
+    // 外した人は、管理役が解除するまで入り直せない
+    await tx.insert(groupBans).values({ groupId: g.id, userId, bannedById: viewer.id }).onConflictDoNothing();
+    await audit(tx, { actorId: viewer.id, action: "group.remove_member", targetType: "group", targetId: g.id, meta: { userId } });
+  });
+}
+
+/** 外した人の一覧（管理役だけ） */
+export async function listGroupBans(db: Db, viewer: Viewer, groupId: string) {
+  const { g } = await assertManager(db, viewer, groupId);
+  return db
+    .select({ id: users.id, displayName: users.displayName, since: groupBans.createdAt })
+    .from(groupBans)
+    .innerJoin(users, eq(users.id, groupBans.userId))
+    .where(eq(groupBans.groupId, g.id))
+    .orderBy(desc(groupBans.createdAt));
+}
+
+/** 外した人の解除（また参加・申請できるようになる。自動では戻さない） */
+export async function unbanMember(db: Db, viewer: Viewer, groupId: string, userId: string) {
+  const { g } = await assertManager(db, viewer, groupId);
+  if (!z.uuid().safeParse(userId).success) throw notFound();
+  await db.delete(groupBans).where(and(eq(groupBans.groupId, g.id), eq(groupBans.userId, userId)));
+  await audit(db, { actorId: viewer.id, action: "group.unban_member", targetType: "group", targetId: g.id, meta: { userId } });
 }
 
 export async function setMemberRole(db: Db, viewer: Viewer, groupId: string, userId: string, role: "moderator" | "member") {
@@ -227,7 +260,13 @@ export async function setMemberRole(db: Db, viewer: Viewer, groupId: string, use
   if (role !== "moderator" && role !== "member") throw invalid("役割の指定が正しくありません。");
   const t = await targetMembership(db, g.id, userId);
   if (t.role === "owner" || t.status !== "active") throw conflict("参加中のメンバーだけ役割を変えられます。");
-  await db.update(groupMembers).set({ role }).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.userId, userId)));
+  // オーナーの行は決して書き換えない（同時にオーナーを移された場合に備えて条件に入れる）
+  const [done] = await db
+    .update(groupMembers)
+    .set({ role })
+    .where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.userId, userId), eq(groupMembers.status, "active"), inArray(groupMembers.role, ["member", "moderator"])))
+    .returning({ userId: groupMembers.userId });
+  if (!done) throw conflict("相手の役割が変わったため、変更できませんでした。");
 }
 
 /** オーナーを移す。移した後、元のオーナーはモデレーターになる（オーナーが 2 人にならないよう条件付きで先に降格） */
@@ -276,16 +315,51 @@ export async function setGroupArchived(db: Db, viewer: Viewer, groupId: string, 
   const { g, me } = await loadGroup(db, viewer, groupId);
   const owner = me?.status === "active" && me.role === "owner";
   if (!owner && !isAdmin(viewer)) throw forbidden("グループを閉じられるのは、オーナーかサイトの管理者だけです。");
+  if (!archived && !(await hasActiveOwner(db, g.id))) {
+    throw conflict("オーナーがいないため再開できません。先にサイトの管理者がオーナーを指定してください。");
+  }
   await db.update(groups).set({ archivedAt: archived ? new Date() : null, updatedAt: new Date() }).where(eq(groups.id, g.id));
   await audit(db, { actorId: viewer.id, action: archived ? "group.archive" : "group.unarchive", targetType: "group", targetId: g.id, meta: { byAdmin: !owner } });
 }
 
-/** 退会の前に確認：閉じていないグループのオーナーなら、先に移してもらう */
-export async function ownedOpenGroups(db: DbOrTx, userId: string): Promise<string[]> {
+async function hasActiveOwner(db: DbOrTx, groupId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ one: sql`1` })
+    .from(groupMembers)
+    .innerJoin(users, eq(users.id, groupMembers.userId))
+    .where(and(eq(groupMembers.groupId, groupId), eq(groupMembers.role, "owner"), eq(groupMembers.status, "active"), eq(users.status, "active")));
+  return !!row;
+}
+
+/**
+ * サイトの管理者によるオーナーの指定（オーナーが退会・停止してグループを管理できなくなったとき）。
+ * 相手はそのグループのアクティブなメンバー。いまのオーナーがいればモデレーターにする。監査ログに残す。
+ */
+export async function assignGroupOwnerByAdmin(db: Db, viewer: Viewer, groupId: string, userId: string) {
+  assertMember(viewer);
+  if (!isAdmin(viewer)) throw forbidden("サイトの管理者だけが行える操作です。");
+  const { g } = await loadGroup(db, viewer, groupId);
+  const t = await targetMembership(db, g.id, userId);
+  const [u] = await db.select({ status: users.status }).from(users).where(eq(users.id, userId));
+  if (t.status !== "active" || u?.status !== "active") throw conflict("参加中のメンバーだけをオーナーにできます。");
+  await db.transaction(async (tx) => {
+    await tx.update(groupMembers).set({ role: "moderator" }).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.role, "owner")));
+    const [done] = await tx
+      .update(groupMembers)
+      .set({ role: "owner" })
+      .where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.userId, userId), eq(groupMembers.status, "active")))
+      .returning({ userId: groupMembers.userId });
+    if (!done) throw conflict("相手の状態が変わったため、指定できませんでした。");
+    await audit(tx, { actorId: viewer.id, action: "group.assign_owner_by_admin", targetType: "group", targetId: g.id, meta: { to: userId } });
+  });
+}
+
+/** 退会の前に確認：グループ（閉じたものも含む）のオーナーなら、先に移してもらう */
+export async function ownedGroups(db: DbOrTx, userId: string): Promise<string[]> {
   const rows = await db
     .select({ name: groups.name })
     .from(groupMembers)
     .innerJoin(groups, eq(groups.id, groupMembers.groupId))
-    .where(and(eq(groupMembers.userId, userId), eq(groupMembers.role, "owner"), isNull(groups.archivedAt), ne(groupMembers.status, "pending")));
+    .where(and(eq(groupMembers.userId, userId), eq(groupMembers.role, "owner")));
   return rows.map((r) => r.name);
 }

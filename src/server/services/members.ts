@@ -11,7 +11,7 @@ import { processImage, removeStoredFile } from "./media";
 import { blockedBetween } from "../lib/visibility";
 import { blockState, isBlockedBy } from "./blocks";
 import { relationship } from "./friends";
-import { ownedOpenGroups } from "./groups";
+import { ownedGroups } from "./groups";
 
 /** 会員のプロフィール。承認済み会員（と本人）のものだけ返す */
 export async function getProfile(db: Db, viewer: Viewer, userId: string) {
@@ -132,11 +132,12 @@ export async function withdraw(db: Db, viewer: Viewer, input: { password: string
   if (input.mode !== "delete" && input.mode !== "anonymize") throw invalid("投稿の扱いを選んでください。");
   const [me] = await db.select().from(users).where(eq(users.id, viewer.id));
   if (!me || !(await verifyPassword(input.password, me.passwordHash))) throw invalid("パスワードが正しくありません。");
-  const owned = await ownedOpenGroups(db, viewer.id);
-  if (owned.length) throw invalid(`グループ「${owned.join("」「")}」のオーナーです。先にほかのメンバーへオーナーを移すか、グループを閉じてください。`);
 
   const filesToRemove: string[] = [];
   await db.transaction(async (tx) => {
+    // グループのオーナーなら、先に移してもらう（閉じたグループも。確認はこのトランザクションの中で）
+    const owned = await ownedGroups(tx, viewer.id);
+    if (owned.length) throw invalid(`グループ「${owned.join("」「")}」のオーナーです。先にほかのメンバーへオーナーを移してください（閉じたグループは、再開してから移せます）。`);
     const now = new Date();
     if (input.mode === "delete") {
       await tx.update(posts).set({ deletedAt: now }).where(eq(posts.authorId, viewer.id));

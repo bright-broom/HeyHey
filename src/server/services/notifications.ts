@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { blockedBetween, visibleComment, visiblePost } from "../lib/visibility";
 import type { Db, DbOrTx } from "../db/client";
-import { notifications, users } from "../db/schema";
+import { notifications, posts, users } from "../db/schema";
 import { assertMember } from "../lib/policy";
 import type { Viewer } from "../lib/viewer";
 
@@ -37,6 +37,12 @@ export async function notify(
       .where(sql`${users.id} = ${n.userId} AND (${blockedBetween(n.userId, n.actorId)} OR EXISTS (SELECT 1 FROM user_mutes um WHERE um.muter_id = ${n.userId} AND um.muted_id = ${n.actorId}))`)
       .limit(1);
     if (silenced) return;
+  }
+  // 投稿にひもづく通知は、その投稿がいま相手に見えるときだけ作る
+  // （グループを外れた人・公開範囲の外の人に、投稿の存在や相手の名前を知らせない）
+  if (n.postId && !OPS_NOTIFICATION_TYPES.includes(n.type)) {
+    const [visible] = await db.select({ one: sql`1` }).from(posts).where(and(eq(posts.id, n.postId), visiblePost(n.userId))).limit(1);
+    if (!visible) return;
   }
   await db.insert(notifications).values({
     userId: n.userId,

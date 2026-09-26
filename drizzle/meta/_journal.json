@@ -50,6 +50,13 @@
       "when": 1790464454797,
       "tag": "0006_groups",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790465217875,
+      "tag": "0007_group_bans",
+      "breakpoints": true
     }
   ]
 }

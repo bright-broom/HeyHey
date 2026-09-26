@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { getDb } from "@/server/db/client";
 import { AppError } from "@/server/lib/errors";
 import {
+  assignGroupOwnerByAdmin,
   createGroup,
   joinGroup,
   leaveGroup,
@@ -13,6 +14,7 @@ import {
   setGroupArchived,
   setMemberRole,
   transferGroupOwnership,
+  unbanMember,
   updateGroup,
 } from "@/server/services/groups";
 import { attempt, str, type FormState } from "@/server/web/action";
@@ -86,6 +88,14 @@ export async function groupAction(fd: FormData) {
       case "transfer":
         await transferGroupOwnership(db, viewer!, groupId, userId);
         message = "オーナーを移しました。";
+        break;
+      case "unban":
+        await unbanMember(db, viewer!, groupId, userId);
+        message = "除外を解除しました。また参加・申請できるようになります。";
+        break;
+      case "assign_owner":
+        await assignGroupOwnerByAdmin(db, viewer!, groupId, userId);
+        message = "オーナーを指定しました。";
         break;
       case "archive":
       case "unarchive":

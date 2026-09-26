@@ -47,8 +47,10 @@ export function visiblePost(viewerId: string | SQL): SQL {
   return and(
     isNull(posts.deletedAt),
     or(
-      // 自分の投稿は非表示処分中でも見える（画面では「非表示中」と表示）
-      eq(posts.authorId, viewerId),
+      // 自分の投稿は非表示処分中でも見える（画面では「非表示中」と表示）。
+      // ただしグループの投稿は、自分もいまそのグループのメンバーであるときだけ
+      // （外された・閉じたグループの投稿を入口に、新しいやりとりを読み書きさせない）
+      and(eq(posts.authorId, viewerId), or(isNull(posts.groupId), activeInOpenGroup(viewerId, posts.groupId))),
       and(
         isNull(posts.hiddenAt),
         authorIsShowable(posts.authorId),
