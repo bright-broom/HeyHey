@@ -6,3 +6,6 @@ skills-lock.json
 tests
 test-results
 playwright-report
+.owner-credentials.txt
+*.pem
+*.key
