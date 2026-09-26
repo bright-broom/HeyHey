@@ -191,13 +191,24 @@ describe("設定（有効化）", () => {
     await expect(enroll(admin.viewer, { ticket })).rejects.toMatchObject({ code: "invalid" }); // 使用済み
   });
 
-  it("未設定の会員は管理者に任命できない（未設定の管理者を生まない）", async () => {
+  it("管理者に任命すると、会員のうちに設定した 2 段階認証は破棄され、チケットで設定し直すまで権限が働かない", async () => {
     const owner = await makeUser(d, { role: "owner" });
     const m = await makeUser(d);
-    await expect(setRole(d, owner.viewer, m.user.id, "admin")).rejects.toMatchObject({ code: "conflict" });
+    // パスワードだけを知る攻撃者が、会員のうちに自分の認証アプリを登録していた、とする
     await enroll(m.viewer);
+    const s1 = await createSession(d, m.user.id);
     await setRole(d, owner.viewer, m.user.id, "admin");
+    expect(await userFromSession(d, s1.token)).toBeNull();
+    const promoted = await refreshViewer(d, m.user.id);
+    expect(promoted.mfa).toBe(false);
+    expect(isAdmin(promoted)).toBe(false);
+    await expect(enroll(promoted)).rejects.toMatchObject({ code: "invalid" });
+    const { ticket } = await issueEnrollmentTicket(d, m.user.id);
+    await enroll(promoted, { ticket });
     expect(isAdmin(await refreshViewer(d, m.user.id))).toBe(true);
+    // すでに管理者の人を「管理者」にし直しても、2 段階認証は消えない
+    await setRole(d, owner.viewer, m.user.id, "admin");
+    expect((await refreshViewer(d, m.user.id)).mfa).toBe(true);
   });
 });
 

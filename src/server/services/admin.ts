@@ -7,8 +7,10 @@ import {
   auditLogs,
   comments,
   invitations,
+  mfaRecoveryCodes,
   posts,
   reports,
+  userMfa,
   users,
 } from "../db/schema";
 import { conflict, forbidden, invalid, notFound } from "../lib/errors";
@@ -16,7 +18,6 @@ import { assertAdmin, assertOwner } from "../lib/policy";
 import type { Viewer } from "../lib/viewer";
 import { audit } from "./audit";
 import { deleteUserSessions } from "./auth";
-import { mfaEnabled } from "./mfa";
 import { appUrl, sendMail } from "./mailer";
 
 // ───────── 入会審査 ─────────
@@ -253,12 +254,17 @@ export async function setRole(db: Db, viewer: Viewer, userId: string, role: "mem
   const target = await loadTarget(db, userId);
   if (target.id === viewer.id || target.role === "owner") throw forbidden("オーナーの権限は変更できません。");
   if (target.status !== "active") throw conflict("承認済みの会員のみ権限を変更できます。");
-  // 任命の時点で 2 段階認証が済んでいれば、管理者の設定にチケットが要らず、未設定の管理者も生まれない
-  if (role === "admin" && target.role !== "admin" && !(await mfaEnabled(db, userId))) {
-    throw conflict("管理者に任命できるのは、2 段階認証を設定済みの会員だけです。本人に設定してもらってから任命してください。");
-  }
+  const promoted = role === "admin" && target.role !== "admin";
   await db.transaction(async (tx) => {
     await tx.update(users).set({ role, updatedAt: new Date() }).where(eq(users.id, userId));
+    if (promoted) {
+      // 会員のうちに設定された 2 段階認証は、パスワードだけで設定できたもの（誰が設定したか保証がない）。
+      // 任命時に破棄して全端末からログアウトさせ、運営者の設定チケットで設定し直してもらう。
+      // それまでは管理権限が働かない（policy.isAdmin）
+      await tx.delete(mfaRecoveryCodes).where(eq(mfaRecoveryCodes.userId, userId));
+      await tx.delete(userMfa).where(eq(userMfa.userId, userId));
+      await deleteUserSessions(tx, userId);
+    }
     await audit(tx, { actorId: viewer.id, action: "user.set_role", targetType: "user", targetId: userId, meta: { from: target.role, to: role } });
   });
 }

@@ -30,7 +30,7 @@ export function MemberActions({ userId, status, role, quota, viewerIsOwner, isSe
         </form>
       )}
       {viewerIsOwner && !isSelf && role !== "owner" && status === "active" && (
-        <form action={action} className="flex items-end gap-2">
+        <form action={action} className="flex flex-wrap items-end gap-2">
           <input type="hidden" name="userId" value={userId} />
           <input type="hidden" name="op" value="role" />
           <div>
@@ -41,6 +41,7 @@ export function MemberActions({ userId, status, role, quota, viewerIsOwner, isSe
             </select>
           </div>
           <SubmitButton className="btn-ghost">変更</SubmitButton>
+          {role === "member" && <p className="hint basis-full">管理者にすると全端末からログアウトされ、運営者の設定チケットで 2 段階認証を設定し直すまで管理機能は使えません。</p>}
         </form>
       )}
       {role === "member" && (
