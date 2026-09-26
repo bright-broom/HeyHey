@@ -29,27 +29,42 @@ npm run dev       # http://localhost:3000
 > `npm run dev` の実行中に `npm run db:seed` などを同時に動かさないでください。PGlite は 1 プロセスからしか開けません。
 > データを初期化したいときは、サーバーを止めて `.data/` を削除し、`npm run demo` をやり直します。
 
-## 本番で動かす
+## 本番（Vercel）
 
-| 環境変数 | 必須 | 内容 |
+本番は Vercel の `brightbroom-projects/kakomi` にデプロイ済みです（https://kakomi.vercel.app）。
+
+| 役割 | サービス | 備考 |
 | --- | --- | --- |
-| `DATABASE_URL` | ○ | PostgreSQL の接続文字列（Supabase / Neon / RDS など）。未設定だと PGlite で動く |
-| `APP_URL` | ○ | 公開 URL（例：`https://sns.example.com`）。メール内リンクと Cookie の Secure 判定に使う |
-| `OWNER_EMAIL` / `OWNER_PASSWORD` / `OWNER_NAME` | 初回のみ | `npm run setup` で作るオーナーアカウント |
-| `RESEND_API_KEY` / `MAIL_FROM` | ○ | メール送信（Resend）。未設定だと送信箱に溜まるだけ |
-| `UPLOAD_DIR` | | 画像の保存先（既定 `.data/uploads`） |
-| `TRUST_PROXY` | | 自前のリバースプロキシの後ろで動かすとき `1`（Vercel では不要） |
+| アプリ | Vercel Functions（sin1） | DB と同じリージョンに固定（`vercel.json`） |
+| DB | Neon（Vercel Marketplace・sin1） | `DATABASE_URL`（プーラー経由）と `DATABASE_URL_UNPOOLED`（マイグレーション用）は自動で入る |
+| 画像 | Vercel Blob（private・sin1） | `BLOB_READ_WRITE_TOKEN` は自動で入る。直接 URL では読めず、必ず `/api/media` の認可を通る |
+
+デプロイ時のビルドでマイグレーションが自動で流れます（`vercel-build` スクリプト）。
 
 ```bash
-npm run build
-DATABASE_URL=... npm run setup   # マイグレーション＋オーナー作成
-npm start
+vercel deploy --prod
 ```
 
-**注意**：画像は現在ローカルのディスクに保存します。
-Vercel のようなサーバーレス環境ではディスクが永続しないため、そのままでは画像が消えます。
-Vercel に載せる場合は、先に画像の保存先を S3 / Supabase Storage に差し替えてください（`src/server/services/media.ts` の保存・読み出し 3 か所）。
-VPS・コンテナ（Fly.io、Render、ECS など）なら、永続ボリュームを `UPLOAD_DIR` に割り当てればそのまま動きます。
+| 環境変数 | 内容 |
+| --- | --- |
+| `EMAIL_VERIFICATION` | `off` の間はメール確認を省き、招待リンク＋管理者の承認だけで入会する（現在 `off`） |
+| `RESEND_API_KEY` / `MAIL_FROM` | メール送信（Resend）。設定したら `EMAIL_VERIFICATION` を削除して再デプロイ |
+| `APP_URL` | 独自ドメインを使うときだけ設定。未設定なら Vercel の本番ドメインを自動で使う |
+
+オーナーアカウントの作り直しや追加は、本番の環境変数を取り込んでから `scripts/seed.ts` を実行します（会員が 0 人のときだけ作成）。
+
+```bash
+vercel env pull .env.production.local --environment production
+set -a; source .env.production.local; set +a
+OWNER_EMAIL=... OWNER_PASSWORD=... npx tsx --conditions=react-server scripts/seed.ts
+```
+
+> シェルで `NODE_ENV=production` が設定されていると、`npm install` が開発用パッケージを入れません。ローカル開発では `npm install --include=dev` を使ってください。
+
+### Vercel 以外で動かす場合
+
+`DATABASE_URL`（PostgreSQL）を設定し、画像はディスク（`UPLOAD_DIR`）に保存されます。
+コンテナで動かすときは `UPLOAD_DIR` に永続ボリュームを割り当て、リバースプロキシの後ろなら `TRUST_PROXY=1` を設定します。
 
 ## 設計の要点
 
@@ -72,7 +87,8 @@ Server Actions は外部から直接呼べる HTTP エンドポイントなの�
 
 ```bash
 npm run typecheck
-npm test            # 54 件：公開範囲・入会フロー・通報と処分・権限境界・画像・レビュー指摘の回帰
+npm test            # 55 件：公開範囲・入会フロー・通報と処分・権限境界・画像・レビュー指摘の回帰
+TEST_DATABASE_URL=postgres://... npm run test:pg   # 同じテストを実際の PostgreSQL で（本番と同じドライバ）
 npm run build && npm run test:e2e   # 7 件：本番ビルドをブラウザで操作（招待→承認→投稿→停止）
 npm run verify      # 上記すべて
 ```
@@ -100,7 +116,7 @@ npm run verify      # 上記すべて
 
 ## 既知の制限
 
-- 画像の保存先がローカルディスク（上記「本番で動かす」参照）
+- Vercel の Hobby プランは商用利用不可。本番運用に入る前に Pro へ移す
 - 退会者データの 30 日後の完全削除は未実装（現在は退会時点で個人情報を消去し、投稿は選択に従って削除／匿名化）
 - 利用規約・プライバシーポリシーは雛形。公開前に運営者の実情に合わせて見直しが必要
 - 通知のメール送信・週次ダイジェスト（F-19）は未実装
