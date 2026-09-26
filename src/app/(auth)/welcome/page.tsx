@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { acceptTermsAction } from "@/app/actions/auth";
+import { acceptTermsAction, logoutAction } from "@/app/actions/auth";
 import { SubmitButton } from "@/components/SubmitButton";
 import { getViewer, homeFor } from "@/server/web/session";
 import { TermsBody } from "@/components/TermsBody";
@@ -25,6 +25,10 @@ export default async function WelcomePage() {
           利用規約に同意します
         </label>
         <SubmitButton className="btn-primary w-full">同意してはじめる</SubmitButton>
+      </form>
+      {/* 同意しない人が閉じ込められないように */}
+      <form action={logoutAction}>
+        <button className="btn-link">同意せずにログアウト</button>
       </form>
     </div>
   );

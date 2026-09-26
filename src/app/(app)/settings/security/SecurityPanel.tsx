@@ -42,6 +42,12 @@ export function SecurityPanel(p: Props) {
             <dt className="text-muted">未使用のリカバリーコード</dt>
             <dd className="tabular-nums">{p.recoveryRemaining} / 10</dd>
           </dl>
+          {p.recoveryRemaining <= 2 && (
+            <p role="status" className="basis-full border-l-2 border-warn py-1 pl-3 text-sm text-warn">
+              {p.recoveryRemaining === 0 ? "リカバリーコードがありません。" : `リカバリーコードが残り ${p.recoveryRemaining} 個です。`}
+              スマートフォンをなくすとログインできなくなるので、下の「作り直す」で新しいコードを控えてください。
+            </p>
+          )}
         </section>
 
         <section className="space-y-4">
