@@ -7,6 +7,8 @@ import path from "node:path";
 import { closeDb, getDb } from "../src/server/db/client";
 
 async function main() {
+  // マイグレーションは接続プーラーを通さない直結 URL で流す（Neon / Supabase の推奨）
+  if (process.env.DATABASE_URL_UNPOOLED) process.env.DATABASE_URL = process.env.DATABASE_URL_UNPOOLED;
   if (process.env.DATABASE_URL) {
     const { migrate } = await import("drizzle-orm/node-postgres/migrator");
     const db = await getDb();

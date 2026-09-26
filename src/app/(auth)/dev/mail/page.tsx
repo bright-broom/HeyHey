@@ -3,6 +3,7 @@ import { desc } from "drizzle-orm";
 import { getDb } from "@/server/db/client";
 import { mailOutbox } from "@/server/db/schema";
 import { formatDateTime } from "@/components/time";
+import { isHttps } from "@/server/lib/env";
 
 export const metadata = { title: "開発用メールボックス" };
 
@@ -13,7 +14,7 @@ export const metadata = { title: "開発用メールボックス" };
 export default async function DevMailPage() {
   const enabled = process.env.NODE_ENV !== "production" || process.env.ENABLE_DEV_MAILBOX === "1";
   // 本番 URL（https）では有効化フラグがあっても開かない
-  if (!enabled || process.env.RESEND_API_KEY || (process.env.APP_URL ?? "").startsWith("https://")) notFound();
+  if (!enabled || process.env.RESEND_API_KEY || isHttps()) notFound();
   const mails = await (await getDb()).select().from(mailOutbox).orderBy(desc(mailOutbox.createdAt)).limit(30);
   return (
     <div className="space-y-3">

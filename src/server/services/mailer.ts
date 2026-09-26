@@ -1,5 +1,6 @@
 import type { DbOrTx } from "../db/client";
 import { mailOutbox } from "../db/schema";
+import { appBaseUrl } from "../lib/env";
 
 export type Mail = { to: string; subject: string; body: string };
 
@@ -25,6 +26,5 @@ export async function sendMail(db: DbOrTx, mail: Mail): Promise<void> {
 }
 
 export function appUrl(path: string): string {
-  const base = (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
-  return `${base}${path}`;
+  return `${appBaseUrl()}${path}`;
 }

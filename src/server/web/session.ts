@@ -3,12 +3,13 @@ import { cache } from "react";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getDb } from "../db/client";
+import { isHttps } from "../lib/env";
 import { isAdmin, isMember } from "../lib/policy";
 import { toViewer, type Viewer } from "../lib/viewer";
 import { userFromSession } from "../services/auth";
 
 /** 本番（https）では __Host- 接頭辞＋Secure で、サブドメインや http からの上書きを防ぐ */
-const SECURE = (process.env.APP_URL ?? "").startsWith("https://");
+const SECURE = isHttps();
 export const SESSION_COOKIE = SECURE ? "__Host-kakomi_session" : "kakomi_session";
 
 export async function setSessionCookie(token: string, expiresAt: Date) {

@@ -9,3 +9,6 @@ playwright-report
 *.tsbuildinfo
 next-env.d.ts
 .vercel
+.agents
+.claude
+skills-lock.json
