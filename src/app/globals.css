@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
+  --color-brand: #2e5b86;
+  --color-brand-strong: #214566;
+  --color-brand-soft: #e8f0f7;
+  --color-canvas: #f3f4f6;
+  --color-card: #ffffff;
+  --color-ink: #1b1f24;
+  --color-muted: #5f6873;
+  --color-line: #e2e5e9;
+  --color-danger: #b42318;
+  --color-danger-soft: #fdecea;
+  --color-ok: #1d6f47;
+  --color-ok-soft: #e7f5ee;
+  --color-warn: #8a5a00;
+  --color-warn-soft: #fff5de;
+}
+
+html { -webkit-text-size-adjust: 100%; }
+body { background: var(--color-canvas); color: var(--color-ink); }
+
+@utility card {
+  @apply rounded-xl border border-line bg-card;
+}
+@utility btn {
+  @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand;
+}
+@utility btn-primary {
+  @apply btn bg-brand text-white hover:bg-brand-strong;
+}
+@utility btn-ghost {
+  @apply btn border border-line bg-card text-ink hover:bg-canvas;
+}
+@utility btn-danger {
+  @apply btn bg-danger text-white hover:opacity-90;
+}
+@utility btn-link {
+  @apply text-sm font-medium text-brand hover:underline;
+}
+@utility input {
+  @apply w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] outline-none placeholder:text-muted/70 focus:border-brand focus:ring-2 focus:ring-brand/20;
+}
+@utility label {
+  @apply mb-1 block text-sm font-semibold;
+}
+@utility hint {
+  @apply mt-1 text-xs text-muted;
+}
+@utility badge {
+  @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold;
+}
+@utility h1 {
+  @apply text-xl font-bold tracking-tight;
+}
+@utility h2 {
+  @apply text-base font-bold;
+}

@@ -1,0 +1,168 @@
+import { expect, test, type Browser, type Page } from "@playwright/test";
+import sharp from "sharp";
+
+/**
+ * 許可制 SNS の一連の流れを、本番ビルド＋ブラウザで通す。
+ * 招待 → 登録 → メール確認 → 審査中は何も見えない → 承認 → 規約同意 → 投稿・公開範囲 → 停止で即遮断
+ */
+test.describe.configure({ mode: "serial" });
+
+const OWNER = { email: "owner@e2e.test", password: "owner-password-123" };
+const NEWBIE = { email: "newbie@e2e.test", password: "newbie-password-123" };
+
+let inviteUrl = "";
+let mediaUrl = "";
+let ownerPage: Page;
+let newbiePage: Page;
+
+async function login(page: Page, who: { email: string; password: string }) {
+  await page.goto("/login");
+  await page.getByLabel("メールアドレス").fill(who.email);
+  await page.getByLabel("パスワード").fill(who.password);
+  await page.getByRole("button", { name: "ログイン" }).click();
+}
+
+async function newPage(browser: Browser) {
+  const ctx = await browser.newContext();
+  return ctx.newPage();
+}
+
+test("未ログインでは何も見えない", async ({ page }) => {
+  for (const path of ["/", "/members", "/admin", "/posts/00000000-0000-0000-0000-000000000000"]) {
+    await page.goto(path);
+    await expect(page).toHaveURL(/\/login/);
+  }
+  const res = await page.request.get("/api/media/00000000-0000-0000-0000-000000000000");
+  expect(res.status()).toBe(404);
+  const robots = await page.request.get("/robots.txt");
+  expect(await robots.text()).toContain("Disallow: /");
+  const html = await page.request.get("/login");
+  expect(html.headers()["x-robots-tag"]).toContain("noindex");
+});
+
+test("オーナーが画像付きで投稿し、招待リンクを発行する", async ({ browser }) => {
+  ownerPage = await newPage(browser);
+  await login(ownerPage, OWNER);
+  await expect(ownerPage).toHaveURL("/");
+
+  const img = await sharp({ create: { width: 400, height: 300, channels: 3, background: "#2e5b86" } })
+    .jpeg()
+    .withExif({ IFD0: { Make: "SecretCam" } })
+    .toBuffer();
+  await ownerPage.getByLabel("本文").fill("オーナーからのお知らせ（全会員向け）");
+  await ownerPage.locator('input[name="images"]').setInputFiles({ name: "photo.jpg", mimeType: "image/jpeg", buffer: img });
+  await ownerPage.getByRole("button", { name: "投稿する" }).click();
+  const post = ownerPage.getByTestId("post").filter({ hasText: "オーナーからのお知らせ" });
+  await expect(post).toBeVisible();
+  mediaUrl = (await post.locator('img[src^="/api/media/"]').first().getAttribute("src"))!;
+  const served = await ownerPage.request.get(mediaUrl);
+  expect(served.status()).toBe(200);
+  expect(served.headers()["content-type"]).toBe("image/webp");
+  expect((await served.body()).includes(Buffer.from("SecretCam"))).toBe(false);
+
+  await ownerPage.goto("/invites");
+  await ownerPage.getByRole("button", { name: "招待リンクを発行" }).click();
+  inviteUrl = await ownerPage.getByTestId("invite-url").inputValue();
+  expect(inviteUrl).toMatch(/\/join\/[A-Za-z0-9_-]{40,}$/);
+});
+
+test("招待リンクから申請し、メールで確認する", async ({ browser }) => {
+  newbiePage = await newPage(browser);
+  const p = newbiePage;
+  await p.goto(inviteUrl);
+  await expect(p.getByText("さんから招待されています")).toBeVisible();
+  await p.getByLabel("メールアドレス").fill(NEWBIE.email);
+  await p.getByLabel("パスワード", { exact: true }).fill(NEWBIE.password);
+  await p.getByLabel("パスワード（確認）").fill(NEWBIE.password);
+  await p.getByLabel("表示名").fill("新人さん");
+  await p.getByLabel("氏名").fill("新人 一郎");
+  await p.getByLabel("招待者との関係").fill("オーナーの元同僚");
+  await p.getByLabel("自己紹介").fill("よろしくお願いします。");
+  await p.getByRole("checkbox").check();
+  await p.getByRole("button", { name: "申請する" }).click();
+  await expect(p).toHaveURL("/join/sent");
+
+  // 同じ招待リンクはもう使えない
+  const again = await newPage(browser);
+  await again.goto(inviteUrl);
+  await expect(again.getByText("招待リンクを確認できません")).toBeVisible();
+
+  await p.goto("/dev/mail");
+  const mail = p.locator(`[data-testid="mail"][data-to="${NEWBIE.email}"]`).first();
+  const verifyPath = (await mail.innerText()).match(/\/verify\/[A-Za-z0-9_-]+/)![0];
+  await p.goto(verifyPath);
+  await p.getByRole("button", { name: "メールアドレスを確認する" }).click();
+  await expect(p.getByText("メールアドレスを確認しました")).toBeVisible();
+});
+
+test("審査中の申請者は、コミュニティの中身に一切触れない", async () => {
+  const p = newbiePage;
+  await login(p, NEWBIE);
+  await expect(p).toHaveURL("/status");
+  await expect(p.getByText("（審査中）")).toBeVisible();
+  for (const path of ["/", "/members", "/invites", "/admin"]) {
+    await p.goto(path);
+    await expect(p).toHaveURL("/status");
+  }
+  expect((await p.request.get(mediaUrl)).status()).toBe(404);
+});
+
+test("オーナーが承認すると、規約同意の後にフィードが見える", async () => {
+  await ownerPage.goto("/admin/applications");
+  const app = ownerPage.getByTestId("application").filter({ hasText: "新人 一郎" });
+  await expect(app.getByText("オーナーの元同僚")).toBeVisible();
+  await app.getByRole("button", { name: "承認する" }).click();
+  await expect(ownerPage.getByText("承認しました。")).toBeVisible();
+
+  const p = newbiePage;
+  await p.goto("/");
+  await expect(p).toHaveURL("/welcome");
+  await p.getByRole("checkbox").check();
+  await p.getByRole("button", { name: "同意してはじめる" }).click();
+  await expect(p).toHaveURL("/");
+  await expect(p.getByText("オーナーからのお知らせ")).toBeVisible();
+  expect((await p.request.get(mediaUrl)).status()).toBe(200);
+});
+
+test("「友達のみ」の投稿は友達以外に見えない。コメントは通知される", async () => {
+  const p = newbiePage;
+  await p.getByLabel("本文").fill("友達だけに話したいこと");
+  await p.getByLabel("公開範囲").selectOption("friends");
+  await p.getByRole("button", { name: "投稿する" }).click();
+  const secret = p.getByTestId("post").filter({ hasText: "友達だけに話したいこと" });
+  await expect(secret).toBeVisible();
+  const secretId = await secret.getAttribute("data-post-id");
+
+  await ownerPage.goto("/");
+  await expect(ownerPage.getByText("友達だけに話したいこと")).toHaveCount(0);
+  await ownerPage.goto(`/posts/${secretId}`);
+  await expect(ownerPage.getByText("ページが見つかりません")).toBeVisible();
+
+  // 新人がオーナーの投稿にコメント → オーナーに通知
+  await p.goto("/");
+  const post = p.getByTestId("post").filter({ hasText: "オーナーからのお知らせ" });
+  await post.getByPlaceholder("コメントを書く…").fill("よろしくお願いします！");
+  await post.getByRole("button", { name: "送信" }).click();
+  await expect(post.getByText("よろしくお願いします！")).toBeVisible();
+  await ownerPage.goto("/notifications");
+  await expect(ownerPage.getByText("新人さん さんがあなたの投稿にコメントしました")).toBeVisible();
+});
+
+test("利用停止すると、次の操作から即座に締め出される", async () => {
+  await ownerPage.goto("/admin/members?q=newbie");
+  await ownerPage.getByRole("link", { name: "新人さん" }).click();
+  await ownerPage.getByPlaceholder("停止理由（必須・監査ログに残ります）").fill("E2E テスト");
+  await ownerPage.getByRole("button", { name: "利用停止にする" }).click();
+  await expect(ownerPage.getByText("利用停止にしました。")).toBeVisible();
+
+  await newbiePage.goto("/");
+  await expect(newbiePage).toHaveURL(/\/login/);
+  expect((await newbiePage.request.get(mediaUrl)).status()).toBe(404);
+
+  await login(newbiePage, NEWBIE);
+  await expect(newbiePage.getByText("利用停止中")).toBeVisible();
+
+  await ownerPage.goto("/admin/audit");
+  await expect(ownerPage.getByRole("cell", { name: "利用停止", exact: true })).toBeVisible();
+  await expect(ownerPage.getByRole("cell", { name: "申請を承認" })).toBeVisible();
+});
