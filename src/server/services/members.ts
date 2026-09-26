@@ -1,7 +1,7 @@
 import { and, asc, eq, ilike, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "../db/client";
-import { applications, comments, friendships, invitations, media, posts, profiles, sessions, users } from "../db/schema";
+import { applications, comments, friendships, groupMembers, invitations, media, posts, profiles, sessions, users } from "../db/schema";
 import { forbidden, invalid } from "../lib/errors";
 import { verifyPassword } from "../lib/password";
 import { assertMember } from "../lib/policy";
@@ -11,6 +11,7 @@ import { processImage, removeStoredFile } from "./media";
 import { blockedBetween } from "../lib/visibility";
 import { blockState, isBlockedBy } from "./blocks";
 import { relationship } from "./friends";
+import { ownedOpenGroups } from "./groups";
 
 /** 会員のプロフィール。承認済み会員（と本人）のものだけ返す */
 export async function getProfile(db: Db, viewer: Viewer, userId: string) {
@@ -131,6 +132,8 @@ export async function withdraw(db: Db, viewer: Viewer, input: { password: string
   if (input.mode !== "delete" && input.mode !== "anonymize") throw invalid("投稿の扱いを選んでください。");
   const [me] = await db.select().from(users).where(eq(users.id, viewer.id));
   if (!me || !(await verifyPassword(input.password, me.passwordHash))) throw invalid("パスワードが正しくありません。");
+  const owned = await ownedOpenGroups(db, viewer.id);
+  if (owned.length) throw invalid(`グループ「${owned.join("」「")}」のオーナーです。先にほかのメンバーへオーナーを移すか、グループを閉じてください。`);
 
   const filesToRemove: string[] = [];
   await db.transaction(async (tx) => {
@@ -148,6 +151,7 @@ export async function withdraw(db: Db, viewer: Viewer, input: { password: string
     filesToRemove.push(...avatars.map((a) => a.key));
     await tx.update(profiles).set({ bio: "", affiliation: "", avatarMediaId: null }).where(eq(profiles.userId, viewer.id));
     await tx.delete(friendships).where(or(eq(friendships.requesterId, viewer.id), eq(friendships.addresseeId, viewer.id)));
+    await tx.delete(groupMembers).where(eq(groupMembers.userId, viewer.id));
     await tx.update(invitations).set({ revokedAt: now, revokedById: viewer.id }).where(and(eq(invitations.createdById, viewer.id), sql`${invitations.revokedAt} IS NULL`));
     await tx
       .update(applications)

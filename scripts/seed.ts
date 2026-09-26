@@ -10,7 +10,7 @@ import { randomBytes } from "node:crypto";
 import sharp from "sharp";
 import { eq, sql } from "drizzle-orm";
 import { closeDb, getDb, type Db } from "../src/server/db/client";
-import { applications, friendships, profiles, userMfa, users, type User } from "../src/server/db/schema";
+import { applications, friendships, groupMembers, groups, profiles, userMfa, users, type User } from "../src/server/db/schema";
 import { DEMO_ACCOUNTS, DEMO_PASSWORD, DEMO_TOTP_SECRET, type DemoAccount } from "../src/server/lib/demo";
 import { hashPassword } from "../src/server/lib/password";
 import { seal } from "../src/server/lib/secretbox";
@@ -146,11 +146,40 @@ async function seedDemo(db: Db) {
   }
   // 投稿などの中身は、会員（佐藤さん）を初めて作ったときだけ入れる
   if (created.some((a) => a.email === "sato@example.com")) await seedContent(db, byEmail);
+  await ensureDemoGroups(db, byEmail);
 
   console.log(created.length ? `✓ デモアカウントを ${created.length} 人追加しました` : "・デモアカウントはすべて作成済みです");
   console.log(`  パスワードはすべて ${DEMO_PASSWORD}。ローカルの開発サーバーでは、ログイン画面の「デモアカウント」から 1 クリックでも入れます`);
   console.log(`  2 段階認証が有効な人（オーナー・管理者・高橋さん）の鍵：${DEMO_TOTP_SECRET}`);
   for (const a of DEMO_ACCOUNTS) console.log(`  ${a.email.padEnd(24)} ${a.label}`);
+}
+
+/**
+ * デモのグループ（名前で見つかれば作らない）。
+ * - 山歩きの会：参加自由。佐藤さんがオーナー、田中さん・高橋さんがメンバー
+ * - 読書会：承認制。田中さんがオーナー、鈴木さんが承認待ち（管理役の画面を試せる）
+ */
+async function ensureDemoGroups(db: Db, byEmail: Map<string, User>) {
+  const get = (email: string) => byEmail.get(email)!;
+  const defs = [
+    { name: "山歩きの会", description: "週末の山歩きの計画と報告。初心者歓迎です。", joinPolicy: "open" as const, owner: "sato@example.com", members: ["tanaka@example.com", "takahashi@example.com"], pending: [], post: "来月は高尾山の稲荷山コースを歩きませんか。" },
+    { name: "読書会", description: "月に 1 冊、同じ本を読んで感想を話します。", joinPolicy: "approval" as const, owner: "tanaka@example.com", members: ["owner@example.com"], pending: ["suzuki@example.com"], post: "今月の本は『銀河鉄道の夜』にしましょう。" },
+  ];
+  let made = 0;
+  for (const def of defs) {
+    const [exists] = await db.select({ id: groups.id }).from(groups).where(eq(groups.name, def.name));
+    if (exists) continue;
+    const owner = get(def.owner);
+    const [g] = await db.insert(groups).values({ name: def.name, description: def.description, joinPolicy: def.joinPolicy, createdById: owner.id }).returning();
+    await db.insert(groupMembers).values([
+      { groupId: g!.id, userId: owner.id, role: "owner" as const, status: "active" as const, approvedAt: new Date() },
+      ...def.members.map((e) => ({ groupId: g!.id, userId: get(e).id, role: "member" as const, status: "active" as const, approvedAt: new Date() })),
+      ...def.pending.map((e) => ({ groupId: g!.id, userId: get(e).id, role: "member" as const, status: "pending" as const })),
+    ]);
+    await createPost(db, toViewer(owner), { body: def.post, visibility: "members", groupId: g!.id });
+    made++;
+  }
+  if (made) console.log(`✓ デモのグループを ${made} 件作成しました（山歩きの会・読書会）`);
 }
 
 async function seedContent(db: Db, byEmail: Map<string, User>) {

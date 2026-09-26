@@ -23,6 +23,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/", label: "ホーム" },
     { href: "/members", label: "メンバー" },
     { href: "/friends", label: "友達" },
+    { href: "/groups", label: "グループ" },
     { href: "/notifications", label: "通知", badge: unread },
     { href: "/invites", label: "招待" },
   ];

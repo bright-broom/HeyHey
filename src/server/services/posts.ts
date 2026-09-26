@@ -1,11 +1,11 @@
 import { and, asc, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db, DbOrTx } from "../db/client";
-import { comments, media, notifications, postTags, posts, profiles, reactions, users } from "../db/schema";
+import { comments, groups, media, notifications, postTags, posts, profiles, reactions, users } from "../db/schema";
 import { AppError, forbidden, invalid, notFound } from "../lib/errors";
 import { assertMember } from "../lib/policy";
 import { extractMentionIds, extractTags, maskHiddenMentions, MENTION_RE, resolveMentions, unmaskHiddenMentions } from "../../lib/richtext";
-import { blockedBetween, visibleComment, visiblePost } from "../lib/visibility";
+import { activeInOpenGroup, blockedBetween, visibleComment, visiblePost } from "../lib/visibility";
 import type { Viewer } from "../lib/viewer";
 import { MAX_IMAGES_PER_POST, processImage, removeStoredFile, type ProcessedImage } from "./media";
 import { notify } from "./notifications";
@@ -31,6 +31,8 @@ export type CommentDTO = {
 };
 export type PostDTO = {
   id: string;
+  /** グループの投稿なら、そのグループ（一覧でグループ名を添える） */
+  group: { id: string; name: string } | null;
   body: string;
   visibility: "members" | "friends";
   createdAt: Date;
@@ -175,13 +177,20 @@ async function hydrate(db: Db, viewer: Viewer, rows: (typeof posts.$inferSelect)
       ? await db.select().from(comments).where(inArray(comments.id, top.map((t) => t.id))).orderBy(asc(comments.createdAt))
       : [];
   }
-  const [commentDTOs, resolve] = await Promise.all([loadCommentDTOs(db, viewer, commentRows), resolveBodies(db, viewer, rows.map((p) => p.body))]);
+  const groupIds = [...new Set(rows.map((p) => p.groupId).filter((x): x is string => !!x))];
+  const [commentDTOs, resolve, groupRows] = await Promise.all([
+    loadCommentDTOs(db, viewer, commentRows),
+    resolveBodies(db, viewer, rows.map((p) => p.body)),
+    groupIds.length ? db.select({ id: groups.id, name: groups.name }).from(groups).where(inArray(groups.id, groupIds)) : Promise.resolve([]),
+  ]);
+  const groupName = new Map(groupRows.map((g) => [g.id, g.name]));
 
   return rows.map((p) => {
     const r = emptyReactions();
     for (const x of reactionCounts) if (x.postId === p.id) r[x.type] = x.n;
     return {
       id: p.id,
+      group: p.groupId ? { id: p.groupId, name: groupName.get(p.groupId) ?? "グループ" } : null,
       body: resolve(p.body),
       visibility: p.visibility,
       createdAt: p.createdAt,
@@ -201,10 +210,11 @@ async function hydrate(db: Db, viewer: Viewer, rows: (typeof posts.$inferSelect)
 export const FEED_PAGE_SIZE = 20;
 
 /** ホームフィード（新着順）。authorId を渡すとその人の投稿一覧（プロフィール用） */
-export async function listFeed(db: Db, viewer: Viewer, opts: { before?: Date | null; authorId?: string; tag?: string } = {}) {
+export async function listFeed(db: Db, viewer: Viewer, opts: { before?: Date | null; authorId?: string; tag?: string; groupId?: string } = {}) {
   assertMember(viewer);
   const conds = [visiblePost(viewer.id)];
   if (opts.before && !Number.isNaN(opts.before.getTime())) conds.push(lt(posts.createdAt, opts.before));
+  if (opts.groupId) conds.push(eq(posts.groupId, opts.groupId));
   if (opts.tag) conds.push(sql`EXISTS (SELECT 1 FROM ${postTags} WHERE ${postTags.postId} = ${posts.id} AND ${postTags.tag} = ${opts.tag})`);
   if (opts.authorId) conds.push(eq(posts.authorId, opts.authorId));
   // ホームのフィードからは、ミュートした人の投稿を外す（プロフィールを開けば見える）
@@ -225,7 +235,7 @@ export async function getPostForEdit(db: Db, viewer: Viewer, postId: string) {
   assertMember(viewer);
   const p = await ownPost(db, viewer, postId).catch(() => null);
   if (!p) return null;
-  return { id: p.id, visibility: p.visibility, body: maskHiddenMentions(p.body, await mentionNames(db, viewer, [p.body])) };
+  return { id: p.id, visibility: p.visibility, inGroup: !!p.groupId, body: maskHiddenMentions(p.body, await mentionNames(db, viewer, [p.body])) };
 }
 
 export async function getPost(db: Db, viewer: Viewer, postId: string): Promise<PostDTO | null> {
@@ -288,9 +298,17 @@ async function assertWriteRate(db: Db, viewer: Viewer, kind: "post" | "comment")
 export async function createPost(
   db: Db,
   viewer: Viewer,
-  input: { body: string; visibility: string; images?: Buffer[] },
+  input: { body: string; visibility: string; images?: Buffer[]; groupId?: string | null },
 ): Promise<{ id: string }> {
   assertMember(viewer);
+  // グループの投稿は、そのグループのアクティブなメンバーだけが書ける。公開範囲はグループのメンバー
+  const groupId = input.groupId || null;
+  if (groupId) {
+    if (!z.uuid().safeParse(groupId).success) throw notFound("グループが見つかりません。");
+    const [ok] = await db.select({ one: sql`1` }).from(users).where(and(eq(users.id, viewer.id), activeInOpenGroup(viewer.id, sql`${groupId}::uuid`)));
+    if (!ok) throw notFound("グループが見つかりません。");
+    input = { ...input, visibility: "members" };
+  }
   const parsed = postSchema.safeParse(input);
   if (!parsed.success) throw invalid(parsed.error.issues[0]?.message ?? "入力内容を確認してください。");
   const body = parsed.data.body.trim();
@@ -305,7 +323,7 @@ export async function createPost(
     return await db.transaction(async (tx) => {
       const [p] = await tx
         .insert(posts)
-        .values({ authorId: viewer.id, body, visibility: parsed.data.visibility })
+        .values({ authorId: viewer.id, body, visibility: parsed.data.visibility, groupId })
         .returning({ id: posts.id });
       if (processed.length) {
         await tx.insert(media).values(
@@ -350,7 +368,8 @@ export async function updatePost(db: Db, viewer: Viewer, postId: string, input: 
   const [{ n } = { n: 0 }] = await db.select({ n: sql<number>`count(*)::int` }).from(media).where(eq(media.postId, p.id));
   if (!body && n === 0) throw invalid("本文を入れてください。");
   await db.transaction(async (tx) => {
-    await tx.update(posts).set({ body, visibility: parsed.data.visibility, editedAt: new Date() }).where(eq(posts.id, p.id));
+    // グループの投稿の公開範囲は、グループのメンバーのまま（全会員／友達のみの切り替えはしない）
+    await tx.update(posts).set({ body, visibility: p.groupId ? "members" : parsed.data.visibility, editedAt: new Date() }).where(eq(posts.id, p.id));
     await saveTags(tx, p.id, body);
     // 編集で新しく加わったメンションにだけ知らせる
     const before = new Set(extractMentionIds(p.body));

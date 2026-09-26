@@ -32,7 +32,7 @@ export async function createPostAction(_: FormState, fd: FormData): Promise<Form
   const { db, viewer } = await ctx();
   const images = await files(fd, "images");
   const res = await attempt(async () => {
-    await createPost(db, viewer!, { body: str(fd, "body"), visibility: str(fd, "visibility"), images });
+    await createPost(db, viewer!, { body: str(fd, "body"), visibility: str(fd, "visibility"), images, groupId: str(fd, "groupId") || null });
     return "投稿しました。";
   });
   if (res?.ok) refresh();

@@ -40,6 +40,10 @@ export const reportReason = pgEnum("report_reason", ["spam", "harassment", "inap
 export const reportStatus = pgEnum("report_status", ["open", "resolved"]);
 export const reportResolution = pgEnum("report_resolution", ["dismissed", "hidden", "warned", "suspended"]);
 export const mediaKind = pgEnum("media_kind", ["post", "avatar"]);
+/** open=誰でもすぐ参加 / approval=管理役の承認が必要。どちらも投稿はメンバーにしか見えない */
+export const groupJoinPolicy = pgEnum("group_join_policy", ["open", "approval"]);
+export const groupRole = pgEnum("group_role", ["owner", "moderator", "member"]);
+export const groupMemberStatus = pgEnum("group_member_status", ["active", "pending"]);
 
 // ───────── 会員・認証 ─────────
 
@@ -204,6 +208,44 @@ export const applications = pgTable(
 
 // ───────── コンテンツ ─────────
 
+/**
+ * グループ（F-15）。名前と説明は全会員に見せ、投稿はそのグループのアクティブなメンバーにだけ見せる
+ * （判定は lib/visibility の visiblePost）。閉じたグループ（archivedAt あり）の投稿は誰にも見せない。
+ */
+export const groups = pgTable(
+  "groups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    joinPolicy: groupJoinPolicy("join_policy").notNull().default("approval"),
+    createdById: uuid("created_by_id")
+      .notNull()
+      .references(() => users.id),
+    archivedAt: ts("archived_at"),
+    createdAt: createdAt(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+  },
+  (t) => [index("groups_created_idx").on(t.createdAt)],
+);
+
+export const groupMembers = pgTable(
+  "group_members",
+  {
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => groups.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: groupRole("role").notNull().default("member"),
+    status: groupMemberStatus("status").notNull().default("pending"),
+    createdAt: createdAt(),
+    approvedAt: ts("approved_at"),
+  },
+  (t) => [primaryKey({ columns: [t.groupId, t.userId] }), index("group_members_user_idx").on(t.userId)],
+);
+
 export const posts = pgTable(
   "posts",
   {
@@ -211,6 +253,8 @@ export const posts = pgTable(
     authorId: uuid("author_id")
       .notNull()
       .references(() => users.id),
+    /** グループの投稿ならそのグループ。null ならコミュニティ全体（visibility に従う） */
+    groupId: uuid("group_id").references(() => groups.id),
     body: text("body").notNull(),
     visibility: postVisibility("visibility").notNull().default("members"),
     hiddenAt: ts("hidden_at"),
@@ -219,7 +263,7 @@ export const posts = pgTable(
     editedAt: ts("edited_at"),
     createdAt: createdAt(),
   },
-  (t) => [index("posts_created_idx").on(t.createdAt), index("posts_author_idx").on(t.authorId, t.createdAt)],
+  (t) => [index("posts_created_idx").on(t.createdAt), index("posts_author_idx").on(t.authorId, t.createdAt), index("posts_group_idx").on(t.groupId, t.createdAt)],
 );
 
 /** 投稿のハッシュタグ（本文から抜き出して保存。タグの一覧も公開範囲の判定を通す） */

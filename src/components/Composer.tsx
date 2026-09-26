@@ -11,7 +11,7 @@ const MAX_FILES = 4;
 const MAX_BYTES = 8 * 1024 * 1024;
 
 /** 光の当たった一枚の面。書く場所だけを置き、道具は下の一列にまとめる */
-export function Composer({ name }: { name: string }) {
+export function Composer({ name, groupId, groupName }: { name: string; groupId?: string; groupName?: string }) {
   const [state, action] = useActionState(createPostAction, undefined);
   const formRef = useRef<HTMLFormElement>(null);
   const [previews, setPreviews] = useState<string[]>([]);
@@ -39,6 +39,7 @@ export function Composer({ name }: { name: string }) {
 
   return (
     <form ref={formRef} action={action} className="border border-line bg-light transition-colors duration-200 focus-within:border-ink" aria-label="投稿する">
+      {groupId && <input type="hidden" name="groupId" value={groupId} />}
       <MentionField
         multiline
         name="body"
@@ -72,7 +73,7 @@ export function Composer({ name }: { name: string }) {
           <input type="file" name="images" accept="image/jpeg,image/png,image/webp,image/gif" multiple className="sr-only" onChange={onFiles} />
         </label>
         <div className="ml-auto flex items-center gap-3">
-          <VisibilityToggle />
+          {groupId ? <span className="text-xs text-muted">「{groupName}」のメンバーだけに公開</span> : <VisibilityToggle />}
           <SubmitButton className="btn-primary" pendingText="投稿中…">
             投稿する
           </SubmitButton>

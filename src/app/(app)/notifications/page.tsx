@@ -32,6 +32,10 @@ function describe(n: N): { text: string; href?: string } {
       return { text: `あなたの${d.targetType === "comment" ? "コメント" : "投稿"}に対して管理者が対応しました（${d.resolution}）${d.note ? `：${d.note}` : ""}` };
     case "mention":
       return { text: `${who} さんがあなたをメンションしました`, href: `/posts/${n.postId}` };
+    case "group_join_request":
+      return { text: `${who} さんが、グループ「${d.groupName ?? ""}」への参加を申請しました`, href: `/groups/${d.groupId}` };
+    case "group_join_approved":
+      return { text: `グループ「${d.groupName ?? ""}」への参加が承認されました`, href: `/groups/${d.groupId}` };
     case "application_submitted":
       return { text: `新しい入会申請が届きました（${d.name ?? ""}）`, href: "/admin/applications" };
     case "report_submitted":

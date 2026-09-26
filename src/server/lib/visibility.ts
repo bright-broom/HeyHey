@@ -1,4 +1,4 @@
-import { and, eq, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import { comments, posts } from "../db/schema";
 
 /**
@@ -29,6 +29,14 @@ export function blockedBetween(a: SQL | string, b: SQL | string): SQL {
   )`;
 }
 
+/** a がそのグループのアクティブなメンバーで、グループが閉じられていないか */
+export function activeInOpenGroup(a: SQL | string, groupIdCol: SQL | typeof posts.groupId): SQL {
+  return sql`EXISTS (
+    SELECT 1 FROM group_members gm JOIN groups g ON g.id = gm.group_id
+    WHERE gm.group_id = ${groupIdCol} AND gm.user_id = ${a} AND gm.status = 'active' AND g.archived_at IS NULL
+  )`;
+}
+
 /** 投稿者が「表示してよい状態」か。停止中の会員の投稿は隠し、退会（匿名化）済みは残す */
 function authorIsShowable(authorIdCol: SQL | typeof posts.authorId | typeof comments.authorId): SQL {
   return sql`EXISTS (SELECT 1 FROM users au WHERE au.id = ${authorIdCol} AND au.status IN ('active', 'withdrawn'))`;
@@ -46,8 +54,13 @@ export function visiblePost(viewerId: string | SQL): SQL {
         authorIsShowable(posts.authorId),
         sql`NOT ${blockedBetween(viewerId, sql`${posts.authorId}`)}`,
         or(
-          eq(posts.visibility, "members"),
-          and(eq(posts.visibility, "friends"), areFriends(viewerId, sql`${posts.authorId}`)),
+          // コミュニティ全体の投稿：全会員／友達のみ
+          and(
+            isNull(posts.groupId),
+            or(eq(posts.visibility, "members"), and(eq(posts.visibility, "friends"), areFriends(viewerId, sql`${posts.authorId}`))),
+          ),
+          // グループの投稿：そのグループのアクティブなメンバーだけ（閉じたグループは誰にも見せない）
+          and(isNotNull(posts.groupId), activeInOpenGroup(viewerId, posts.groupId)),
         ),
       ),
     ),

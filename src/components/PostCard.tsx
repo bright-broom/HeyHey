@@ -148,7 +148,13 @@ export function PostCard({ post, mode = "feed" }: { post: PostDTO; mode?: "feed"
               {timeAgo(post.createdAt)}
             </Link>
             <span aria-hidden>／</span>
-            <span>{VISIBILITY_LABEL[post.visibility]}</span>
+            {post.group ? (
+              <Link href={`/groups/${post.group.id}`} className="hover:text-ink">
+                グループ「{post.group.name}」
+              </Link>
+            ) : (
+              <span>{VISIBILITY_LABEL[post.visibility]}</span>
+            )}
             {post.editedAt && (
               <>
                 <span aria-hidden>／</span>

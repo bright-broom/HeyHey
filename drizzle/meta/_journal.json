@@ -43,6 +43,13 @@
       "when": 1790464045747,
       "tag": "0005_notification_email",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790464454797,
+      "tag": "0006_groups",
+      "breakpoints": true
     }
   ]
 }

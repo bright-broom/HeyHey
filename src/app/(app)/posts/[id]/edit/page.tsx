@@ -15,7 +15,7 @@ export default async function EditPostPage(props: PageProps<"/posts/[id]/edit">)
   return (
     <div className="max-w-[640px]">
       <PageTitle plaque="EDIT" title="投稿を編集" />
-      <EditForm id={post.id} body={post.body} visibility={post.visibility} />
+      <EditForm id={post.id} body={post.body} visibility={post.visibility} inGroup={post.inGroup} />
     </div>
   );
 }

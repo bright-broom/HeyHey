@@ -59,7 +59,7 @@ export async function exportMyData(db: Db, viewer: Viewer) {
       .where(eq(applications.userId, id))
       .orderBy(asc(applications.createdAt)),
     db
-      .select({ id: posts.id, body: posts.body, visibility: posts.visibility, createdAt: posts.createdAt, editedAt: posts.editedAt, hiddenAt: posts.hiddenAt })
+      .select({ id: posts.id, groupId: posts.groupId, body: posts.body, visibility: posts.visibility, createdAt: posts.createdAt, editedAt: posts.editedAt, hiddenAt: posts.hiddenAt })
       .from(posts)
       .where(and(eq(posts.authorId, id), isNull(posts.deletedAt)))
       .orderBy(asc(posts.createdAt)),
