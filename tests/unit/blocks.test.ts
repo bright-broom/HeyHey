@@ -1,9 +1,10 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "@/server/db/client";
-import { friendships, media, notifications, profiles } from "@/server/db/schema";
+import { friendships, media, notifications, profiles, users } from "@/server/db/schema";
+import { exportMyData } from "@/server/services/export";
 import { blockUser, listBlocksAndMutes, muteUser, unblockUser, unmuteUser } from "@/server/services/blocks";
-import { requestFriend } from "@/server/services/friends";
+import { listFriends, requestFriend } from "@/server/services/friends";
 import { mediaForViewer } from "@/server/services/media";
 import { getProfile, searchMembers } from "@/server/services/members";
 import { listNotifications, notify } from "@/server/services/notifications";
@@ -118,6 +119,69 @@ describe("ブロック（双方向）", () => {
     expect(JSON.stringify(c)).toContain("通報される投稿");
     const mine = await listNotifications(d, admin.viewer);
     expect(mine.some((n) => n.type === "report_submitted")).toBe(true);
+  });
+});
+
+describe("ブロックのレビュー指摘の回帰", () => {
+  it("ブロックされた側は、相手を会員として通報することもできない（通報の成否からブロックを推測させない）", async () => {
+    const a = await makeUser(d);
+    const b = await makeUser(d);
+    await blockUser(d, a.viewer, b.user.id);
+    await expect(createReport(d, b.viewer, { targetType: "user", targetId: a.user.id, reason: "spam" })).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("ブロックした側には、相手の名前と解除ボタンしか見せない（自己紹介・写真・友達数も出さない）", async () => {
+    const a = await makeUser(d);
+    const b = await makeUser(d);
+    const [m] = await d.insert(media).values({ ownerId: b.user.id, kind: "avatar", storageKey: `${crypto.randomUUID()}.webp`, mime: "image/webp", width: 1, height: 1, bytes: 1 }).returning();
+    await d.update(profiles).set({ avatarMediaId: m!.id, bio: "ひみつの自己紹介", affiliation: "ひみつの所属" }).where(eq(profiles.userId, b.user.id));
+    await blockUser(d, a.viewer, b.user.id);
+    const p = await getProfile(d, a.viewer, b.user.id);
+    expect(p).toMatchObject({ blocking: true, bio: "", affiliation: "", avatarMediaId: null, friendCount: 0 });
+    expect(await mediaForViewer(d, a.viewer, m!.id)).toBeNull();
+    expect((await listBlocksAndMutes(d, a.viewer)).blocked[0]!.avatarMediaId).toBeNull();
+  });
+
+  it("ブロックと行き違いで残った友達申請も、一覧に出さない", async () => {
+    const a = await makeUser(d);
+    const b = await makeUser(d);
+    await blockUser(d, a.viewer, b.user.id);
+    await d.insert(friendships).values({ requesterId: b.user.id, addresseeId: a.user.id });
+    const lists = await listFriends(d, b.viewer);
+    expect([...lists.friends, ...lists.outgoing, ...lists.incoming].map((x) => x.id)).not.toContain(a.user.id);
+    expect((await listFriends(d, a.viewer)).incoming.map((x) => x.id)).not.toContain(b.user.id);
+  });
+
+  it("ブロックしても、相手の受信箱の記録は消さない（ブロック→解除で嫌がらせの証拠を消せない）", async () => {
+    const a = await makeUser(d);
+    const b = await makeUser(d);
+    await notify(d, { userId: a.user.id, type: "comment", actorId: b.user.id });
+    await blockUser(d, b.viewer, a.user.id);
+    await unblockUser(d, b.viewer, a.user.id);
+    expect(await d.select().from(notifications).where(and(eq(notifications.userId, a.user.id), eq(notifications.actorId, b.user.id)))).toHaveLength(1);
+  });
+
+  it("見えないコメントへの返信は、数にも一覧にも出ない", async () => {
+    const a = await makeUser(d);
+    const b = await makeUser(d);
+    const c = await makeUser(d);
+    const post = await rawPost(d, c.user.id);
+    const parent = await addComment(d, b.viewer, { postId: post.id, body: "B のコメント" });
+    await addComment(d, c.viewer, { postId: post.id, body: "C の返信", parentId: parent.id });
+    await blockUser(d, a.viewer, b.user.id);
+    const seen = await getPost(d, a.viewer, post.id);
+    expect(seen!.commentCount).toBe(0);
+    expect(seen!.comments).toHaveLength(0);
+    expect((await getPost(d, c.viewer, post.id))!.commentCount).toBe(2);
+  });
+
+  it("データのダウンロードに、ブロック関係にある招待者の名前は出さない", async () => {
+    const inviter = await makeUser(d, { displayName: "招待した人" });
+    const invitee = await makeUser(d, { invitedById: inviter.user.id });
+    expect((await exportMyData(d, invitee.viewer)).account.invitedBy).toBe("招待した人");
+    await blockUser(d, inviter.viewer, invitee.user.id);
+    expect((await exportMyData(d, invitee.viewer)).account.invitedBy).toBeNull();
+    void users;
   });
 });
 

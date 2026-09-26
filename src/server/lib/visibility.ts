@@ -63,5 +63,13 @@ export function visibleComment(viewerId: string | SQL): SQL {
       eq(comments.authorId, viewerId),
       and(isNull(comments.hiddenAt), authorIsShowable(comments.authorId), sql`NOT ${blockedBetween(viewerId, sql`${comments.authorId}`)}`),
     ),
+    // 返信は、返信先のコメントが見えるときだけ見える（見えないコメントへの返信が数や一覧に出ないように）
+    sql`(${comments.parentId} IS NULL OR EXISTS (
+      SELECT 1 FROM comments pc
+      WHERE pc.id = ${comments.parentId} AND pc.deleted_at IS NULL
+        AND (pc.author_id = ${viewerId} OR (pc.hidden_at IS NULL
+          AND EXISTS (SELECT 1 FROM users pau WHERE pau.id = pc.author_id AND pau.status IN ('active', 'withdrawn'))
+          AND NOT ${blockedBetween(viewerId, sql`pc.author_id`)}))
+    ))`,
   )!;
 }

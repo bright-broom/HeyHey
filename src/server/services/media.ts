@@ -6,7 +6,7 @@ import { media, posts, reports, users } from "../db/schema";
 import { invalid } from "../lib/errors";
 import { isAdmin, isMember } from "../lib/policy";
 import { visiblePost } from "../lib/visibility";
-import { isBlockedBy } from "./blocks";
+import { isBlockedBetween } from "./blocks";
 import type { Viewer } from "../lib/viewer";
 import { removeStoredFile, storeFile } from "./storage";
 
@@ -63,8 +63,8 @@ export async function mediaForViewer(db: Db, viewer: Viewer | null, mediaId: str
       .from(users)
       .where(and(eq(users.id, m.ownerId), sql`${users.status} IN ('active')`));
     if (!owner) return null;
-    // 持ち主にブロックされていれば、写真も見せない
-    if (owner.id !== viewer.id && (await isBlockedBy(db, viewer.id, owner.id))) return null;
+    // ブロック関係（どちら向きでも）なら、写真も見せない
+    if (owner.id !== viewer.id && (await isBlockedBetween(db, viewer.id, owner.id))) return null;
   } else {
     if (!m.postId) return null;
     const [p] = await db

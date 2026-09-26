@@ -1,9 +1,10 @@
-import { and, asc, eq, isNull, or } from "drizzle-orm";
+import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Db } from "../db/client";
 import { applications, comments, friendships, invitations, media, posts, profiles, reactions, reports, userMfa, users } from "../db/schema";
 import { AppError } from "../lib/errors";
 import { assertMember } from "../lib/policy";
+import { blockedBetween } from "../lib/visibility";
 import type { Viewer } from "../lib/viewer";
 import { audit } from "./audit";
 import { consume } from "./ratelimit";
@@ -37,7 +38,8 @@ export async function exportMyData(db: Db, viewer: Viewer) {
       invitedBy: other.displayName,
     })
     .from(users)
-    .leftJoin(other, eq(other.id, users.invitedById))
+    // 招待者とブロック関係なら、招待者の名前は出さない
+    .leftJoin(other, and(eq(other.id, users.invitedById), sql`NOT ${blockedBetween(sql`${users.id}`, sql`${other.id}`)}`))
     .where(eq(users.id, id));
   const [profile] = await db.select({ bio: profiles.bio, affiliation: profiles.affiliation }).from(profiles).where(eq(profiles.userId, id));
   const [mfa] = await db.select({ enabledAt: userMfa.enabledAt }).from(userMfa).where(eq(userMfa.userId, id));

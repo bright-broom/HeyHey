@@ -4,6 +4,7 @@ import type { Db } from "../db/client";
 import { friendships, profiles, users } from "../db/schema";
 import { AppError, conflict, invalid, notFound } from "../lib/errors";
 import { assertMember } from "../lib/policy";
+import { blockedBetween } from "../lib/visibility";
 import type { Viewer } from "../lib/viewer";
 import { isBlockedBetween } from "./blocks";
 import { notify } from "./notifications";
@@ -45,6 +46,8 @@ export async function requestFriend(db: Db, viewer: Viewer, otherId: string) {
     throw new AppError("rate_limited", "短時間に友達申請が集中しています。時間をおいてください。");
   }
   await db.transaction(async (tx) => {
+    // 確認から挿入までの間にブロックされた場合も、申請を残さない
+    if (await isBlockedBetween(tx, viewer.id, otherId)) throw notFound("会員が見つかりません。");
     await tx.insert(friendships).values({ requesterId: viewer.id, addresseeId: otherId }).onConflictDoNothing();
     await notify(tx, { userId: otherId, type: "friend_request", actorId: viewer.id });
   });
@@ -97,7 +100,7 @@ export async function listFriends(db: Db, viewer: Viewer) {
         .select({ id: users.id, displayName: users.displayName, status: users.status, affiliation: profiles.affiliation, avatarMediaId: profiles.avatarMediaId })
         .from(users)
         .leftJoin(profiles, eq(profiles.userId, users.id))
-        .where(and(inArray(users.id, ids), eq(users.status, "active")))
+        .where(and(inArray(users.id, ids), eq(users.status, "active"), sql`NOT ${blockedBetween(viewer.id, sql`${users.id}`)}`))
     : [];
   const byId = new Map(people.map((p) => [p.id, p]));
   const out = { friends: [] as typeof people, incoming: [] as typeof people, outgoing: [] as typeof people };

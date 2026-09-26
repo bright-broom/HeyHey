@@ -33,6 +33,11 @@ export async function getProfile(db: Db, viewer: Viewer, userId: string) {
   if (!row || (row.status !== "active" && row.id !== viewer.id)) return null;
   // 相手にブロックされていれば、存在しないのと同じに見せる
   if (row.id !== viewer.id && (await isBlockedBy(db, viewer.id, row.id))) return null;
+  // こちらがブロックしている相手は、解除のために名前だけ見せる（自己紹介・写真・友達数は出さない）
+  const state = row.id === viewer.id ? { blocking: false, muting: false } : await blockState(db, viewer, userId);
+  if (state.blocking) {
+    return { ...row, bio: "", affiliation: "", avatarMediaId: null, friendCount: 0, relationship: "none" as const, ...state };
+  }
   const [{ n: friendCount } = { n: 0 }] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(friendships)
@@ -43,7 +48,7 @@ export async function getProfile(db: Db, viewer: Viewer, userId: string) {
     affiliation: row.affiliation ?? "",
     friendCount,
     relationship: await relationship(db, viewer, userId),
-    ...(row.id === viewer.id ? { blocking: false, muting: false } : await blockState(db, viewer, userId)),
+    ...state,
   };
 }
 

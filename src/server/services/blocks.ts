@@ -64,15 +64,11 @@ export async function blockUser(db: Db, viewer: Viewer, otherId: string) {
           and(eq(friendships.requesterId, otherId), eq(friendships.addresseeId, viewer.id)),
         ),
       );
-    // お互いに届いていた通知は消す（相手の名前を目にしないように）。運営の通知（審査・通報）は残す
+    // 自分に届いていた相手からの通知は消す（相手の名前を目にしないように）。運営の通知（審査・通報）は残す。
+    // 相手の受信箱には触らない（ブロック→解除で、自分が送った通知を消して証拠を隠せないように）。相手側は表示時に隠れる
     await tx
       .delete(notifications)
-      .where(
-        and(
-          or(and(eq(notifications.userId, viewer.id), eq(notifications.actorId, otherId)), and(eq(notifications.userId, otherId), eq(notifications.actorId, viewer.id))),
-          notInArray(notifications.type, OPS_NOTIFICATION_TYPES),
-        ),
-      );
+      .where(and(eq(notifications.userId, viewer.id), eq(notifications.actorId, otherId), notInArray(notifications.type, OPS_NOTIFICATION_TYPES)));
   });
 }
 
@@ -100,7 +96,7 @@ export async function listBlocksAndMutes(db: Db, viewer: Viewer) {
   assertMember(viewer);
   const [blocked, muted] = await Promise.all([
     db
-      .select({ id: users.id, displayName: users.displayName, avatarMediaId: profiles.avatarMediaId, since: userBlocks.createdAt })
+      .select({ id: users.id, displayName: users.displayName, avatarMediaId: sql<string | null>`NULL`, since: userBlocks.createdAt })
       .from(userBlocks)
       .innerJoin(users, eq(users.id, userBlocks.blockedId))
       .leftJoin(profiles, eq(profiles.userId, users.id))

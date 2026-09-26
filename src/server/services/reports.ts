@@ -9,6 +9,7 @@ import type { Viewer } from "../lib/viewer";
 import { audit } from "./audit";
 import { assertCanModerate, suspendUser } from "./admin";
 import { notify, notifyAdmins } from "./notifications";
+import { isBlockedBy } from "./blocks";
 import { consume } from "./ratelimit";
 
 export const REPORT_REASONS = {
@@ -55,7 +56,8 @@ export async function createReport(db: Db, viewer: Viewer, raw: z.input<typeof r
     targetUserId = c?.authorId;
   } else {
     const [u] = await db.select({ id: users.id }).from(users).where(and(eq(users.id, input.targetId), eq(users.status, "active")));
-    targetUserId = u?.id;
+    // 相手にブロックされていれば、プロフィールと同じく「見つからない」（通報の成否からブロックを推測させない）
+    targetUserId = u && !(await isBlockedBy(db, viewer.id, u.id)) ? u.id : undefined;
   }
   if (!targetUserId) throw notFound("通報の対象が見つかりません。");
   if (targetUserId === viewer.id) throw invalid("自分自身や自分の投稿は通報できません。");
