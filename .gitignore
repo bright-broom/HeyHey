@@ -3,6 +3,7 @@ node_modules
 .data
 .env*.local
 .env
+!.env.example
 test-results
 playwright-report
 *.tsbuildinfo

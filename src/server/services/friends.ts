@@ -2,10 +2,11 @@ import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "../db/client";
 import { friendships, profiles, users } from "../db/schema";
-import { conflict, invalid, notFound } from "../lib/errors";
+import { AppError, conflict, invalid, notFound } from "../lib/errors";
 import { assertMember } from "../lib/policy";
 import type { Viewer } from "../lib/viewer";
 import { notify } from "./notifications";
+import { consume } from "./ratelimit";
 
 export type Relationship = "self" | "friends" | "outgoing" | "incoming" | "none";
 
@@ -38,6 +39,9 @@ export async function requestFriend(db: Db, viewer: Viewer, otherId: string) {
   const rel = await relationship(db, viewer, otherId);
   if (rel === "friends" || rel === "outgoing") return;
   if (rel === "incoming") return respondFriend(db, viewer, otherId, true);
+  if (!(await consume(db, `friend:${viewer.id}`, 30, 60 * 60))) {
+    throw new AppError("rate_limited", "短時間に友達申請が集中しています。時間をおいてください。");
+  }
   await db.transaction(async (tx) => {
     await tx.insert(friendships).values({ requesterId: viewer.id, addresseeId: otherId }).onConflictDoNothing();
     await notify(tx, { userId: otherId, type: "friend_request", actorId: viewer.id });
@@ -56,6 +60,8 @@ export async function respondFriend(db: Db, viewer: Viewer, requesterId: string,
     await db.delete(friendships).where(where);
     return;
   }
+  // 申請者が停止・退会している場合は承認できない（復帰時に友達関係が勝手に復活しないように）
+  await activeMember(db, requesterId);
   await db.transaction(async (tx) => {
     const [f] = await tx.update(friendships).set({ status: "accepted", respondedAt: new Date() }).where(where).returning();
     if (!f) throw conflict("友達申請が見つかりません。");

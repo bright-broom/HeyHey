@@ -63,8 +63,20 @@ export async function requireAdmin(): Promise<Viewer> {
   return v;
 }
 
+/**
+ * レート制限用のクライアント IP。X-Forwarded-For はクライアントが自由に書けるので、
+ * 信頼できるプロキシの後ろにいると明示された場合だけ使う。
+ * - Vercel：プラットフォームが上書きする x-vercel-forwarded-for / x-real-ip
+ * - TRUST_PROXY=1：自前のリバースプロキシ（nginx 等）が付けた X-Forwarded-For の右端
+ * - それ以外：IP を区別しない（アカウント単位の制限は別途かかる）
+ */
 export async function clientIp(): Promise<string> {
   const h = await headers();
-  // 信頼できるリバースプロキシ（Vercel 等）の後ろで動かす前提。最初の値だけを使う
-  return (h.get("x-forwarded-for")?.split(",")[0] ?? h.get("x-real-ip") ?? "local").trim().slice(0, 64);
+  let ip: string | null = null;
+  if (process.env.VERCEL) {
+    ip = h.get("x-vercel-forwarded-for")?.split(",")[0] ?? h.get("x-real-ip");
+  } else if (process.env.TRUST_PROXY === "1") {
+    ip = h.get("x-forwarded-for")?.split(",").at(-1) ?? h.get("x-real-ip");
+  }
+  return (ip ?? "direct").trim().slice(0, 64);
 }

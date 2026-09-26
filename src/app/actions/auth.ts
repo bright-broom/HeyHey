@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { getDb } from "@/server/db/client";
 import { acceptTerms, changePassword, deleteSession, login, register, resendVerification, verifyEmail } from "@/server/services/auth";
+import { safeLocalPath } from "@/server/lib/redirect";
 import { toViewer } from "@/server/lib/viewer";
 import { attempt, str, type FormState } from "@/server/web/action";
 import { setFlash } from "@/server/web/flash";
@@ -21,9 +22,7 @@ export async function loginAction(_: FormState, fd: FormData): Promise<FormState
   const res = await login(db, { email: str(fd, "email"), password: str(fd, "password"), ip: await clientIp() });
   if (!res.ok) return { error: LOGIN_MESSAGES[res.reason], fields: { email: str(fd, "email") } };
   await setSessionCookie(res.token, res.expiresAt);
-  const next = str(fd, "next");
-  // オープンリダイレクト対策：サイト内の相対パスだけ許可
-  const safeNext = next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : null;
+  const safeNext = safeLocalPath(str(fd, "next"));
   const home = homeFor(toViewer(res.user));
   redirect(home === "/" && safeNext ? safeNext : home);
 }

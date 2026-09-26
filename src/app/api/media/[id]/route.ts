@@ -21,7 +21,8 @@ export async function GET(_req: Request, ctx: RouteContext<"/api/media/[id]">) {
     headers: {
       "Content-Type": found.mime,
       "Content-Length": String(data.byteLength),
-      "Cache-Control": "private, max-age=600",
+      // 共有端末でログアウト・友達解除・停止の後にキャッシュから見えないよう、保存させない
+      "Cache-Control": "private, no-store",
       "Content-Disposition": "inline",
       "X-Content-Type-Options": "nosniff",
       "Cross-Origin-Resource-Policy": "same-origin",

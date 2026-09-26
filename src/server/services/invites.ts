@@ -2,7 +2,7 @@ import { and, desc, eq, gt, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db, DbOrTx } from "../db/client";
 import { invitations, users } from "../db/schema";
-import { forbidden, notFound } from "../lib/errors";
+import { forbidden, invalid, notFound } from "../lib/errors";
 import { assertMember, INVITE_TTL_DAYS, isAdmin, monthlyInviteQuota } from "../lib/policy";
 import { hashToken, newToken } from "../lib/tokens";
 import type { Viewer } from "../lib/viewer";
@@ -42,7 +42,9 @@ const createSchema = z.object({
 /** 招待リンクを発行する。URL 用のトークンはこの戻り値でしか得られない（DB はハッシュのみ） */
 export async function createInvitation(db: Db, viewer: Viewer, raw: z.input<typeof createSchema>) {
   assertMember(viewer);
-  const input = createSchema.parse(raw);
+  const parsedInput = createSchema.safeParse(raw);
+  if (!parsedInput.success) throw invalid(parsedInput.error.issues[0]?.message ?? "入力内容を確認してください。");
+  const input = parsedInput.data;
   // 複数回使える招待・長い有効期限は管理者だけ
   if (!isAdmin(viewer) && (input.maxUses !== 1 || input.ttlDays !== INVITE_TTL_DAYS)) {
     throw forbidden("使用回数や有効期限の変更は管理者のみ行えます。");
@@ -89,9 +91,20 @@ export async function listMyInvitations(db: Db, viewer: Viewer) {
 /** 本人は自分の招待を、管理者はすべての招待を即時失効できる */
 export async function revokeInvitation(db: Db, viewer: Viewer, invitationId: string) {
   assertMember(viewer);
-  const [inv] = await db.select().from(invitations).where(eq(invitations.id, invitationId)).limit(1);
+  if (!z.uuid().safeParse(invitationId).success) throw notFound();
+  const [inv] = await db
+    .select({ inv: invitations, creatorRole: users.role })
+    .from(invitations)
+    .innerJoin(users, eq(users.id, invitations.createdById))
+    .where(eq(invitations.id, invitationId))
+    .limit(1)
+    .then((r) => (r[0] ? [{ ...r[0].inv, creatorRole: r[0].creatorRole }] : []));
   if (!inv) throw notFound();
-  if (inv.createdById !== viewer.id && !isAdmin(viewer)) throw forbidden();
+  if (inv.createdById !== viewer.id) {
+    if (!isAdmin(viewer)) throw forbidden();
+    // 管理者はオーナー・他の管理者の招待を取り消せない（オーナーは可）
+    if (inv.creatorRole === "owner" || (inv.creatorRole === "admin" && viewer.role !== "owner")) throw forbidden();
+  }
   if (inv.revokedAt) return;
   await db.transaction(async (tx) => {
     await tx

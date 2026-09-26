@@ -127,6 +127,11 @@ export async function withdraw(db: Db, viewer: Viewer, input: { password: string
     if (input.mode === "delete") {
       await tx.update(posts).set({ deletedAt: now }).where(eq(posts.authorId, viewer.id));
       await tx.update(comments).set({ deletedAt: now }).where(eq(comments.authorId, viewer.id));
+      const postImages = await tx
+        .delete(media)
+        .where(and(eq(media.ownerId, viewer.id), eq(media.kind, "post")))
+        .returning({ key: media.storageKey });
+      filesToRemove.push(...postImages.map((m) => m.key));
     }
     const avatars = await tx.delete(media).where(and(eq(media.ownerId, viewer.id), eq(media.kind, "avatar"))).returning({ key: media.storageKey });
     filesToRemove.push(...avatars.map((a) => a.key));

@@ -2,13 +2,14 @@ import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db, Tx } from "../db/client";
 import { comments, media, posts, profiles, reports, users } from "../db/schema";
-import { conflict, invalid, notFound } from "../lib/errors";
+import { AppError, conflict, invalid, notFound } from "../lib/errors";
 import { assertAdmin, assertMember, AUTO_HIDE_REPORT_THRESHOLD } from "../lib/policy";
 import { visibleComment, visiblePost } from "../lib/visibility";
 import type { Viewer } from "../lib/viewer";
 import { audit } from "./audit";
-import { suspendUser } from "./admin";
+import { assertCanModerate, suspendUser } from "./admin";
 import { notify, notifyAdmins } from "./notifications";
+import { consume } from "./ratelimit";
 
 export const REPORT_REASONS = {
   spam: "スパム・宣伝",
@@ -38,6 +39,9 @@ const reportSchema = z.object({
  */
 export async function createReport(db: Db, viewer: Viewer, raw: z.input<typeof reportSchema>) {
   assertMember(viewer);
+  if (!(await consume(db, `report:${viewer.id}`, 20, 60 * 60))) {
+    throw new AppError("rate_limited", "短時間に通報が集中しています。時間をおいてください。");
+  }
   const parsed = reportSchema.safeParse(raw);
   if (!parsed.success) throw invalid(parsed.error.issues[0]?.message ?? "入力内容を確認してください。");
   const input = parsed.data;
@@ -178,6 +182,11 @@ export async function resolveCase(
     .where(and(eq(reports.targetType, input.targetType), eq(reports.targetId, input.targetId), eq(reports.status, "open")));
   if (!open.length) throw conflict("未処理の通報がありません。");
   const targetUserId = open[0]!.targetUserId;
+  // 「問題なし」以外は投稿者への処分なので、会員停止と同じ権限の境界を守る（管理者はオーナー・他の管理者を処分できない）
+  if (resolution !== "dismissed") {
+    const [author] = await db.select({ id: users.id, role: users.role }).from(users).where(eq(users.id, targetUserId));
+    if (author) assertCanModerate(viewer, author);
+  }
 
   // 停止は既存の会員停止処理（権限チェック・セッション破棄・監査ログ込み）を使う
   if (resolution === "suspended") await suspendUser(db, viewer, targetUserId, note);

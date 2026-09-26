@@ -73,6 +73,7 @@ type Decision =
  */
 export async function decideApplication(db: Db, viewer: Viewer, applicationId: string, d: Decision) {
   assertAdmin(viewer);
+  if (!z.uuid().safeParse(applicationId).success) throw notFound("申請が見つかりません。");
   if (d.kind === "reject" && !(d.reasonKey in REJECT_REASONS)) throw invalid("却下理由を選んでください。");
   const note = (("note" in d && d.note) || "").trim().slice(0, 500);
 
@@ -173,6 +174,7 @@ export async function listUsers(db: Db, viewer: Viewer, opts: { q?: string; stat
 /** 招待の系譜：その人を招待した人の連なりと、その人が招待した人 */
 export async function inviteLineage(db: Db, viewer: Viewer, userId: string) {
   assertAdmin(viewer);
+  if (!z.uuid().safeParse(userId).success) return { chain: [], invitees: [] };
   const chain: { id: string; displayName: string; status: string }[] = [];
   let cursor: string | null = userId;
   for (let i = 0; i < 20 && cursor; i++) {
@@ -203,13 +205,14 @@ export async function getUserForAdmin(db: Db, viewer: Viewer, userId: string) {
 }
 
 async function loadTarget(db: Db, userId: string) {
+  if (!z.uuid().safeParse(userId).success) throw notFound("会員が見つかりません。");
   const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   if (!u) throw notFound("会員が見つかりません。");
   return u;
 }
 
 /** 管理者はオーナーを、自分自身を処分できない。オーナーは管理者を処分できる */
-function assertCanModerate(viewer: Viewer, target: { id: string; role: string }) {
+export function assertCanModerate(viewer: Viewer, target: { id: string; role: string }) {
   if (target.id === viewer.id) throw forbidden("自分自身は対象にできません。");
   if (target.role === "owner") throw forbidden("オーナーは対象にできません。");
   if (target.role === "admin" && viewer.role !== "owner") throw forbidden("管理者を処分できるのはオーナーのみです。");
@@ -258,7 +261,8 @@ export async function setRole(db: Db, viewer: Viewer, userId: string, role: "mem
 export async function setInviteQuota(db: Db, viewer: Viewer, userId: string, quota: number | null) {
   assertAdmin(viewer);
   if (quota !== null && (!Number.isInteger(quota) || quota < 0 || quota > 100)) throw invalid("招待枠は 0〜100 の整数で指定してください。");
-  await loadTarget(db, userId);
+  const target = await loadTarget(db, userId);
+  if (target.role !== "member") throw invalid("招待枠は一般会員にだけ設定できます（管理者以上は無制限）。");
   await db.transaction(async (tx) => {
     await tx.update(users).set({ inviteQuotaOverride: quota, updatedAt: new Date() }).where(eq(users.id, userId));
     await audit(tx, { actorId: viewer.id, action: "user.set_invite_quota", targetType: "user", targetId: userId, meta: { quota } });

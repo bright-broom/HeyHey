@@ -77,10 +77,10 @@ export async function mediaForViewer(db: Db, viewer: Viewer | null, mediaId: str
       .select({ id: posts.id })
       .from(posts)
       .where(and(eq(posts.id, m.postId), visiblePost(viewer.id)));
-    // 管理者は「通報された投稿」に限り、公開範囲外・非表示でも画像を確認できる（閲覧は getCase で監査ログ済み）
+    // 管理者は「未処理の通報がある投稿」に限り、公開範囲外・非表示でも画像を確認できる（閲覧は getCase で監査ログ済み）
     const reportedForAdmin =
       !p && isAdmin(viewer)
-        ? (await db.select({ id: reports.id }).from(reports).where(and(eq(reports.targetType, "post"), eq(reports.targetId, m.postId))).limit(1)).length > 0
+        ? (await db.select({ id: reports.id }).from(reports).where(and(eq(reports.targetType, "post"), eq(reports.targetId, m.postId), eq(reports.status, "open"))).limit(1)).length > 0
         : false;
     if (!p && !reportedForAdmin) return null;
   }

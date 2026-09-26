@@ -26,6 +26,14 @@ const form = (token: string, email?: string) => ({
 });
 const ctx = () => ({ ip: `10.0.0.${++n % 250}` });
 
+/** 新規登録が実際に行われたことを確かめて userId を返す */
+async function reg(token: string, email?: string) {
+  const f = form(token, email);
+  const { userId } = await register(d, f, ctx());
+  expect(userId).toBeTruthy();
+  return { f, userId: userId! };
+}
+
 /** 送信箱から、そのアドレス宛の最新メールに含まれるトークンを取り出す */
 async function tokenFromMail(to: string, path: "/verify/") {
   const [m] = await d.select().from(mailOutbox).where(eq(mailOutbox.to, to)).orderBy(desc(mailOutbox.createdAt)).limit(1);
@@ -87,9 +95,7 @@ describe("登録 → メール確認 → 審査 → 規約同意", () => {
     const inviter = await makeUser(d);
     const admin = await makeUser(d, { role: "admin" });
     const { token } = await createInvitation(d, inviter.viewer, {});
-    const f = form(token);
-
-    const { userId } = await register(d, f, ctx());
+    const { f, userId } = await reg(token);
     let me = await refreshViewer(d, userId);
     expect(me.status).toBe("unverified");
     expect(isMember(me)).toBe(false);
@@ -116,8 +122,7 @@ describe("登録 → メール確認 → 審査 → 規約同意", () => {
   it("確認リンクは 1 回しか使えない", async () => {
     const inviter = await makeUser(d);
     const { token } = await createInvitation(d, inviter.viewer, {});
-    const f = form(token);
-    await register(d, f, ctx());
+    const { f } = await reg(token);
     const t = await tokenFromMail(f.email, "/verify/");
     expect((await verifyEmail(d, t)).ok).toBe(true);
     expect((await verifyEmail(d, t)).ok).toBe(false);
@@ -130,14 +135,30 @@ describe("登録 → メール確認 → 審査 → 規約同意", () => {
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
   });
 
-  it("登録済みのメールアドレスでは、状態を明かさずに断る", async () => {
+  it("登録済みのメールアドレスでも画面上は同じ応答。招待は消費され、本人にだけ通知が届く", async () => {
     const inviter = await makeUser(d, { role: "admin" });
     const existing = await makeUser(d);
-    const { token } = await createInvitation(d, inviter.viewer, {});
-    await expect(register(d, form(token, existing.user.email), ctx())).rejects.toMatchObject({
-      code: "conflict",
-      message: expect.not.stringMatching(/停止|却下|申請中/),
-    });
+    const { token, invitation } = await createInvitation(d, inviter.viewer, {});
+    const res = await register(d, form(token, existing.user.email), ctx());
+    expect(res.userId).toBeNull();
+    const [inv] = await d.select().from(invitations).where(eq(invitations.id, invitation.id));
+    expect(inv!.useCount).toBe(1); // 同じリンクで存在確認を繰り返せない
+    const mails = await d.select().from(mailOutbox).where(eq(mailOutbox.to, existing.user.email));
+    expect(mails.some((m) => m.subject.includes("登録の申し込み"))).toBe(true);
+    const [u] = await d.select().from(users).where(eq(users.id, existing.user.id));
+    expect(u!.passwordHash).toBe(existing.user.passwordHash); // 既存アカウントは一切変わらない
+  });
+
+  it("確認されずに 24 時間たった登録は、別の招待で登録し直せる（他人のアドレスの押さえ対策）", async () => {
+    const admin = await makeUser(d, { role: "admin" });
+    const first = await createInvitation(d, admin.viewer, {});
+    const { f, userId } = await reg(first.token);
+    await d.update(users).set({ updatedAt: new Date(Date.now() - 25 * 3600_000) }).where(eq(users.id, userId));
+    const second = await createInvitation(d, admin.viewer, {});
+    const again = await register(d, { ...form(second.token, f.email) }, ctx());
+    expect(again.userId).toBe(userId);
+    const open = await d.select().from(applications).where(eq(applications.userId, userId));
+    expect(open).toHaveLength(1); // 古い未審査の申請は置き換わる
   });
 
   it("一般会員は審査できない。二重承認はできない", async () => {
@@ -145,8 +166,7 @@ describe("登録 → メール確認 → 審査 → 規約同意", () => {
     const admin = await makeUser(d, { role: "admin" });
     const member = await makeUser(d);
     const { token } = await createInvitation(d, inviter.viewer, {});
-    const f = form(token);
-    const { userId } = await register(d, f, ctx());
+    const { f, userId } = await reg(token);
     await verifyEmail(d, await tokenFromMail(f.email, "/verify/"));
     const [app] = await d.select().from(applications).where(eq(applications.userId, userId));
     await expect(decideApplication(d, member.viewer, app!.id, { kind: "approve" })).rejects.toMatchObject({ code: "forbidden" });
@@ -157,8 +177,7 @@ describe("登録 → メール確認 → 審査 → 規約同意", () => {
   it("却下されるとログインできず、30 日経つまで再申請できない", async () => {
     const inviter = await makeUser(d, { role: "admin" });
     const { token } = await createInvitation(d, inviter.viewer, {});
-    const f = form(token);
-    const { userId } = await register(d, f, ctx());
+    const { f, userId } = await reg(token);
     await verifyEmail(d, await tokenFromMail(f.email, "/verify/"));
     const [app] = await d.select().from(applications).where(eq(applications.userId, userId));
     await decideApplication(d, inviter.viewer, app!.id, { kind: "reject", reasonKey: "unknown_relation" });
@@ -168,7 +187,8 @@ describe("登録 → メール確認 → 審査 → 規約同意", () => {
     expect(mails.some((m) => m.subject.includes("結果"))).toBe(true);
 
     const again = await createInvitation(d, inviter.viewer, {});
-    await expect(register(d, { ...form(again.token, f.email) }, ctx())).rejects.toMatchObject({ code: "conflict" });
+    expect((await register(d, { ...form(again.token, f.email) }, ctx())).userId).toBeNull();
+    expect((await refreshViewer(d, userId)).status).toBe("rejected");
 
     await d.update(users).set({ rejectedAt: new Date(Date.now() - 31 * 86400_000) }).where(eq(users.id, userId));
     const third = await createInvitation(d, inviter.viewer, {});
@@ -180,8 +200,7 @@ describe("登録 → メール確認 → 審査 → 規約同意", () => {
   it("保留にしても申請中のまま審査一覧に残る", async () => {
     const admin = await makeUser(d, { role: "admin" });
     const { token } = await createInvitation(d, admin.viewer, {});
-    const f = form(token);
-    const { userId } = await register(d, f, ctx());
+    const { f, userId } = await reg(token);
     await verifyEmail(d, await tokenFromMail(f.email, "/verify/"));
     const [app] = await d.select().from(applications).where(eq(applications.userId, userId));
     await decideApplication(d, admin.viewer, app!.id, { kind: "hold", note: "招待者に確認中" });

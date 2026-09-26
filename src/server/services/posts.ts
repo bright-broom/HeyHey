@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "../db/client";
-import { comments, media, posts, profiles, reactions, users } from "../db/schema";
+import { comments, media, notifications, posts, profiles, reactions, users } from "../db/schema";
 import { AppError, forbidden, invalid, notFound } from "../lib/errors";
 import { assertMember } from "../lib/policy";
 import { visibleComment, visiblePost } from "../lib/visibility";
@@ -280,7 +280,12 @@ export async function updatePost(db: Db, viewer: Viewer, postId: string, input: 
 export async function deletePost(db: Db, viewer: Viewer, postId: string) {
   assertMember(viewer);
   const p = await ownPost(db, viewer, postId);
-  await db.update(posts).set({ deletedAt: new Date() }).where(eq(posts.id, p.id));
+  // 投稿は論理削除だが、画像は実体ごと消す（見えない画像をディスクに残さない）
+  const removed = await db.transaction(async (tx) => {
+    await tx.update(posts).set({ deletedAt: new Date() }).where(eq(posts.id, p.id));
+    return tx.delete(media).where(eq(media.postId, p.id)).returning({ key: media.storageKey });
+  });
+  await Promise.all(removed.map((m) => removeStoredFile(m.key)));
 }
 
 // ───────── コメント ─────────
@@ -357,6 +362,9 @@ export async function toggleReaction(
     if (!c) throw notFound();
   } else throw invalid("対象が指定されていません。");
 
+  if (!(await consume(db, `react:${viewer.id}`, 300, 60 * 60))) {
+    throw new AppError("rate_limited", "短時間の操作が多すぎます。少し時間をおいてください。");
+  }
   const col = postId ? reactions.postId : reactions.commentId;
   const id = (postId ?? target.commentId)!;
   await db.transaction(async (tx) => {
@@ -367,8 +375,22 @@ export async function toggleReaction(
       await tx.update(reactions).set({ type: t }).where(eq(reactions.id, existing.id));
     } else {
       await tx.insert(reactions).values({ userId: viewer.id, postId: postId ?? null, commentId: postId ? null : id, type: t });
+      // 付けたり外したりを繰り返しても、同じ人・同じ投稿のリアクション通知は 1 日 1 回まで
       if (postId && postAuthorId) {
-        await notify(tx, { userId: postAuthorId, type: "reaction", actorId: viewer.id, postId, data: { reaction: t } });
+        const [recent] = await tx
+          .select({ id: notifications.id })
+          .from(notifications)
+          .where(
+            and(
+              eq(notifications.userId, postAuthorId),
+              eq(notifications.actorId, viewer.id),
+              eq(notifications.postId, postId),
+              eq(notifications.type, "reaction"),
+              sql`${notifications.createdAt} > now() - interval '1 day'`,
+            ),
+          )
+          .limit(1);
+        if (!recent) await notify(tx, { userId: postAuthorId, type: "reaction", actorId: viewer.id, postId, data: { reaction: t } });
       }
     }
   });

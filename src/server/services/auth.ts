@@ -1,8 +1,8 @@
-import { and, eq, gt, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db, DbOrTx } from "../db/client";
 import { applications, emailTokens, invitations, profiles, rateLimits, sessions, users, type User } from "../db/schema";
-import { AppError, conflict, invalid } from "../lib/errors";
+import { AppError, invalid } from "../lib/errors";
 import { burnPasswordCheck, hashPassword, PASSWORD_MIN, verifyPassword } from "../lib/password";
 import { REAPPLY_COOLDOWN_DAYS } from "../lib/policy";
 import { hashToken, newToken } from "../lib/tokens";
@@ -118,12 +118,12 @@ export type RegisterInput = z.input<typeof registerSchema>;
  * 招待の消費・会員作成・申請作成を 1 トランザクションで行い、
  * 使用回数の上限は UPDATE ... WHERE use_count < max_uses で原子的に守る。
  */
-export async function register(db: Db, raw: RegisterInput, ctx: { ip: string }): Promise<{ userId: string }> {
+export async function register(db: Db, raw: RegisterInput, ctx: { ip: string }): Promise<{ userId: string | null }> {
   const parsed = registerSchema.safeParse(raw);
   if (!parsed.success) throw invalid(parsed.error.issues[0]?.message ?? "入力内容を確認してください。");
   const input = parsed.data;
 
-  if (!(await consume(db, `register:ip:${ctx.ip}`, 10, 60 * 60))) {
+  if (!(await consume(db, `register:ip:${ctx.ip}`, 30, 60 * 60))) {
     throw new AppError("rate_limited", "短時間に登録が集中しています。時間をおいて再度お試しください。");
   }
 
@@ -133,18 +133,8 @@ export async function register(db: Db, raw: RegisterInput, ctx: { ip: string }):
     const inv = await checkInvitation(tx, input.token);
     if (!inv.ok) throw invalid(inv.message);
 
-    const [existing] = await tx.select().from(users).where(eq(users.email, input.email)).limit(1);
-    if (existing) {
-      const cooledDown =
-        existing.status === "rejected" &&
-        existing.rejectedAt &&
-        Date.now() - existing.rejectedAt.getTime() >= REAPPLY_COOLDOWN_DAYS * DAY;
-      if (!cooledDown) {
-        // どの状態で存在するかは教えない（メールアドレスの存在確認に使われないように）
-        throw conflict("このメールアドレスでは登録できません。すでに登録済みの場合はログインしてください。");
-      }
-    }
-
+    // 招待は先に消費する。既存アドレスでの登録でも 1 回分を使うので、
+    // 招待リンク 1 本で「このメールは登録済みか」を何度も試すことはできない
     const [claimed] = await tx
       .update(invitations)
       .set({ useCount: sql`${invitations.useCount} + 1` })
@@ -159,9 +149,32 @@ export async function register(db: Db, raw: RegisterInput, ctx: { ip: string }):
       .returning({ id: invitations.id, createdById: invitations.createdById });
     if (!claimed) throw invalid("この招待リンクは使用済みか、有効期限が切れています。");
 
+    const [existing] = await tx.select().from(users).where(eq(users.email, input.email)).limit(1);
+    const reusable =
+      existing &&
+      // 却下から 30 日経過後の再申請
+      ((existing.status === "rejected" && existing.rejectedAt && Date.now() - existing.rejectedAt.getTime() >= REAPPLY_COOLDOWN_DAYS * DAY) ||
+        // 確認されないまま期限切れになった登録（他人のアドレスの「押さえ」を防ぐ）
+        (existing.status === "unverified" && Date.now() - existing.updatedAt.getTime() >= VERIFY_TTL_HOURS * 60 * 60 * 1000));
+
+    if (existing && !reusable) {
+      // 登録済みのアドレス：画面上は通常の登録と同じ応答にし（存在を明かさない）、本人にだけ知らせる
+      await audit(tx, { actorId: null, action: "user.register_existing_email", targetType: "user", targetId: existing.id, meta: { invitationId: claimed.id } });
+      await sendMail(tx, {
+        to: existing.email,
+        subject: "【Kakomi】このメールアドレスで登録の申し込みがありました",
+        body: [
+          "このメールアドレスで Kakomi への新規登録が試みられましたが、すでにアカウントがあるため登録は行っていません。",
+          "ご自身の操作であれば、ログイン画面からログインしてください。心当たりがない場合は、このメールを破棄してください。",
+          "",
+          appUrl("/login"),
+        ].join("\n"),
+      });
+      return { userId: null };
+    }
+
     let userId: string;
     if (existing) {
-      // 却下から 30 日経過後の再申請：同じ行を申請中に戻す
       await tx
         .update(users)
         .set({
@@ -175,6 +188,8 @@ export async function register(db: Db, raw: RegisterInput, ctx: { ip: string }):
           updatedAt: new Date(),
         })
         .where(eq(users.id, existing.id));
+      await tx.update(emailTokens).set({ usedAt: new Date() }).where(and(eq(emailTokens.userId, existing.id), isNull(emailTokens.usedAt)));
+      await tx.delete(applications).where(and(eq(applications.userId, existing.id), inArray(applications.status, ["pending", "on_hold"])));
       userId = existing.id;
     } else {
       const [u] = await tx
@@ -199,13 +214,13 @@ export async function register(db: Db, raw: RegisterInput, ctx: { ip: string }):
       introduction: input.introduction,
     });
     await audit(tx, { actorId: userId, action: "user.register", targetType: "user", targetId: userId, meta: { invitationId: claimed.id } });
-    await issueVerification(tx, userId, input.email);
+    await issueVerification(tx, userId, input.email, { displayName: input.displayName, inviterName: inv.inviterName });
     return { userId };
   });
   return result;
 }
 
-async function issueVerification(db: DbOrTx, userId: string, email: string) {
+async function issueVerification(db: DbOrTx, userId: string, email: string, who: { displayName: string; inviterName?: string }) {
   const token = newToken();
   await db.insert(emailTokens).values({
     tokenHash: hashToken(token),
@@ -218,7 +233,10 @@ async function issueVerification(db: DbOrTx, userId: string, email: string) {
     subject: "【Kakomi】メールアドレスの確認",
     body: [
       "Kakomi への入会申請ありがとうございます。",
-      "下のリンクを開くとメールアドレスの確認が完了し、申請が管理者に届きます。",
+      `申請内容：表示名「${who.displayName}」${who.inviterName ? `／招待者「${who.inviterName}」` : ""}`,
+      "",
+      "ご自身の申請であれば、下のリンクを開いて確認を完了してください。申請が管理者に届きます。",
+      "ご自身の申請でない場合はリンクを開かず、このメールを破棄してください。",
       "",
       appUrl(`/verify/${token}`),
       "",
@@ -263,7 +281,7 @@ export async function resendVerification(db: Db, emailRaw: string, ctx: { ip: st
   if (!(await consume(db, `resend:ip:${ctx.ip}`, 10, 60 * 60))) return;
   const [u] = await db.select().from(users).where(eq(users.email, email)).limit(1);
   if (!u || u.status !== "unverified") return;
-  await issueVerification(db, u.id, u.email);
+  await issueVerification(db, u.id, u.email, { displayName: u.displayName });
 }
 
 export async function acceptTerms(db: Db, userId: string): Promise<void> {

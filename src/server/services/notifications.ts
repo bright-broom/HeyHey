@@ -1,4 +1,5 @@
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { visiblePost } from "../lib/visibility";
 import type { Db, DbOrTx } from "../db/client";
 import { notifications, users } from "../db/schema";
 import { assertMember } from "../lib/policy";
@@ -41,6 +42,14 @@ export async function notifyAdmins(
   for (const a of admins) await notify(db, { ...n, userId: a.id });
 }
 
+/**
+ * 投稿にひもづく通知は、いまその投稿が見える場合だけ出す
+ * （友達解除・非表示・削除の後に、見えない投稿の存在や相手の名前が通知から漏れないように）
+ */
+function stillVisible(viewerId: string) {
+  return or(isNull(notifications.postId), sql`EXISTS (SELECT 1 FROM posts WHERE posts.id = ${notifications.postId} AND ${visiblePost(viewerId)})`)!;
+}
+
 export async function listNotifications(db: Db, viewer: Viewer, limit = 50) {
   assertMember(viewer);
   return db
@@ -57,7 +66,7 @@ export async function listNotifications(db: Db, viewer: Viewer, limit = 50) {
     })
     .from(notifications)
     .leftJoin(users, eq(users.id, notifications.actorId))
-    .where(eq(notifications.userId, viewer.id))
+    .where(and(eq(notifications.userId, viewer.id), stillVisible(viewer.id)))
     .orderBy(desc(notifications.createdAt))
     .limit(limit);
 }
@@ -66,7 +75,7 @@ export async function unreadCount(db: Db, viewer: Viewer): Promise<number> {
   const [row] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(notifications)
-    .where(and(eq(notifications.userId, viewer.id), isNull(notifications.readAt)));
+    .where(and(eq(notifications.userId, viewer.id), isNull(notifications.readAt), stillVisible(viewer.id)));
   return row?.n ?? 0;
 }
 
