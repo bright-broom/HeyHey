@@ -6,12 +6,11 @@ import { FormMessage } from "@/components/FormMessage";
 import { QrCode } from "@/components/QrCode";
 import { SubmitButton } from "@/components/SubmitButton";
 
-type Setup = { secret: string; qr: boolean[][] };
 type Props = {
   enabled: boolean;
   enabledAtLabel: string;
   recoveryRemaining: number;
-  pending: Setup | null;
+  needsTicket: boolean;
   canDisable: boolean;
   adminAfter: boolean;
 };
@@ -86,7 +85,8 @@ export function SecurityPanel(p: Props) {
     );
   }
 
-  const setup = begin?.setup ?? p.pending;
+  // 設定途中の鍵はサーバーに残さない。再読み込みしたら「設定を始める」からやり直す
+  const setup = begin?.setup;
   if (!setup) {
     return (
       <section className="space-y-6">
@@ -95,6 +95,7 @@ export function SecurityPanel(p: Props) {
           <Step n={2}>画面の QR コードをアプリで読み取る</Step>
           <Step n={3}>アプリに出た 6 桁のコードを入力して確認する</Step>
         </ol>
+        {p.needsTicket && <p className="text-sm leading-relaxed text-muted">管理者の設定には、運営者が発行する設定チケット（30 分有効）も必要です。先に受け取っておいてください。</p>}
         <form action={beginAction}>
           <SubmitButton className="btn-primary" pendingText="準備中…">設定を始める</SubmitButton>
         </form>
@@ -115,6 +116,7 @@ export function SecurityPanel(p: Props) {
         <p className="plaque">STEP 2</p>
         <h2 className="h2">コードを入力して確認する</h2>
         <form action={confirmAction} className="space-y-4">
+          <input type="hidden" name="setupToken" value={setup.token} />
           <div>
             <label htmlFor="mfa-code" className="label">認証アプリの 6 桁のコード</label>
             <input id="mfa-code" name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9 ]{6,7}" maxLength={7} required className="input tabular-nums tracking-[0.3em]" />
@@ -124,9 +126,16 @@ export function SecurityPanel(p: Props) {
             <input id="mfa-password" name="password" type="password" autoComplete="current-password" required className="input" />
             <p className="hint">本人の操作であることを確かめるために使います。</p>
           </div>
+          {p.needsTicket && (
+            <div>
+              <label htmlFor="mfa-ticket" className="label">設定チケット</label>
+              <input id="mfa-ticket" name="ticket" autoComplete="off" spellCheck={false} required className="input font-mono text-[13px]" />
+              <p className="hint">運営者が発行した文字列を貼り付けてください。</p>
+            </div>
+          )}
           <FormMessage state={confirm} />
           <SubmitButton className="btn-primary" pendingText="確認中…">確認して有効にする</SubmitButton>
-          <p className="hint">有効にすると、この端末以外からはログアウトされます。</p>
+          <p className="hint">有効にすると、この端末以外からはログアウトされます。確認は 15 分以内に行ってください。</p>
         </form>
       </section>
     </div>

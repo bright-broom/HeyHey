@@ -20,7 +20,8 @@ export default defineConfig({
   },
   webServer: {
     // 本番ビルドを、使い捨ての DB で起動する（先に npm run build が必要）
-    command: `rm -rf .data/e2e && npm run db:seed && npx next start -p ${PORT}`,
+    // オーナーの 2 段階認証の設定チケットも発行しておく（運営者の手順と同じ）
+    command: `rm -rf .data/e2e && npm run db:seed && npm run -s mfa:ticket -- owner@e2e.test > .data/e2e/owner-ticket.txt && npx next start -p ${PORT}`,
     url: `http://localhost:${PORT}/login`,
     reuseExistingServer: false,
     timeout: 120_000,

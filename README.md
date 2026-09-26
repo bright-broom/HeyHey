@@ -54,10 +54,13 @@ vercel deploy --prod
 | `MFA_ENCRYPTION_KEY` | **必須**。2 段階認証の秘密鍵を暗号化する鍵（`openssl rand -base64 32`）。失うと全員の 2 段階認証が使えなくなるので、DB とは別の場所に控える |
 
 2 段階認証は管理者以上で必須です。
+管理者以上が設定するときは、運営者が発行する 1 回限りの設定チケット（30 分有効）が要ります。
+新しく管理者に任命できるのは、2 段階認証を設定済みの会員だけです。
 管理者がスマートフォンもリカバリーコードも失ったときは、本人確認のうえで運営者が解除します（監査ログに残り、全端末からログアウトされます）。
 
 ```bash
 set -a; source .env.production.local; set +a
+npm run mfa:ticket -- owner@example.com          # 設定チケットを発行（本人には画面の外で渡す）
 npm run mfa:reset -- someone@example.com "解除の理由と本人確認の方法"
 ```
 
@@ -99,7 +102,7 @@ Server Actions は外部から直接呼べる HTTP エンドポイントなの�
 
 ```bash
 npm run typecheck
-npm test            # 71 件：公開範囲・入会フロー・通報と処分・権限境界・画像・2 段階認証・レビュー指摘の回帰
+npm test            # 75 件：公開範囲・入会フロー・通報と処分・権限境界・画像・2 段階認証・レビュー指摘の回帰
 TEST_DATABASE_URL=postgres://... npm run test:pg   # 同じテストを実際の PostgreSQL で（本番と同じドライバ）
 npm run build && npm run test:e2e   # 8 件：本番ビルドをブラウザで操作（招待→2 段階認証→承認→投稿→停止）
 npm run verify      # 上記すべて

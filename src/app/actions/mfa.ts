@@ -10,7 +10,7 @@ import { setFlash } from "@/server/web/flash";
 import { getViewer, readSessionToken } from "@/server/web/session";
 
 export type MfaFormState =
-  | { error?: string; setup?: { secret: string; qr: boolean[][] }; recoveryCodes?: string[] }
+  | { error?: string; setup?: { secret: string; qr: boolean[][]; token: string }; recoveryCodes?: string[] }
   | undefined;
 
 async function viewerOrLogin() {
@@ -32,8 +32,8 @@ async function run(fn: () => Promise<MfaFormState>): Promise<MfaFormState> {
 export async function beginMfaAction(_: MfaFormState): Promise<MfaFormState> {
   const v = await viewerOrLogin();
   return run(async () => {
-    const { secret, uri } = await beginEnrollment(await getDb(), v);
-    return { setup: { secret, qr: qrMatrix(uri) } };
+    const { secret, uri, setupToken } = await beginEnrollment(await getDb(), v);
+    return { setup: { secret, qr: qrMatrix(uri), token: setupToken } };
   });
 }
 
@@ -41,7 +41,13 @@ export async function confirmMfaAction(_: MfaFormState, fd: FormData): Promise<M
   const v = await viewerOrLogin();
   const keepSessionToken = await readSessionToken();
   return run(async () => {
-    const { recoveryCodes } = await confirmEnrollment(await getDb(), v, { password: str(fd, "password"), code: str(fd, "code"), keepSessionToken });
+    const { recoveryCodes } = await confirmEnrollment(await getDb(), v, {
+      password: str(fd, "password"),
+      code: str(fd, "code"),
+      setupToken: str(fd, "setupToken"),
+      ticket: str(fd, "ticket") || undefined,
+      keepSessionToken,
+    });
     return { recoveryCodes };
   });
 }

@@ -120,26 +120,23 @@ export async function login(db: Db, input: { email: string; password: string; ip
 /**
  * ログインの 2 段階目。認証アプリのコードかリカバリーコードで、チャレンジをセッションに換える。
  * 総当たり対策は 2 重：チャレンジごとに 5 回、アカウントごとに 15 分で 5 回。
+ * どちらも「照合の前に」原子的に 1 回分を確保する。並列に大量に送っても、照合されるのは上限までになる。
  */
 export async function completeLogin(db: Db, input: { challenge: string; code: string }): Promise<LoginResult> {
   if (!input.challenge || input.challenge.length > 200) return { ok: false, reason: "expired" };
   const hash = hashToken(input.challenge);
   const [ch] = await db
-    .select()
-    .from(loginChallenges)
+    .update(loginChallenges)
+    .set({ attempts: sql`${loginChallenges.attempts} + 1` })
     .where(and(eq(loginChallenges.tokenHash, hash), gt(loginChallenges.expiresAt, new Date()), lt(loginChallenges.attempts, CHALLENGE_MAX_ATTEMPTS)))
-    .limit(1);
+    .returning({ userId: loginChallenges.userId });
   if (!ch) return { ok: false, reason: "expired" };
 
   const keyAccount = `login:mfa:${ch.userId}`;
-  if (await isLocked(db, keyAccount, LOGIN_FAIL_LIMIT, LOGIN_WINDOW_SEC)) return { ok: false, reason: "rate_limited" };
+  if (!(await consume(db, keyAccount, LOGIN_FAIL_LIMIT, LOGIN_WINDOW_SEC))) return { ok: false, reason: "rate_limited" };
 
   const factor = await checkSecondFactor(db, ch.userId, input.code);
-  if (!factor) {
-    await db.update(loginChallenges).set({ attempts: sql`${loginChallenges.attempts} + 1` }).where(eq(loginChallenges.tokenHash, hash));
-    const accountOk = await consume(db, keyAccount, LOGIN_FAIL_LIMIT, LOGIN_WINDOW_SEC);
-    return { ok: false, reason: accountOk ? "invalid" : "rate_limited" };
-  }
+  if (!factor) return { ok: false, reason: "invalid" };
 
   return db.transaction(async (tx) => {
     // チャレンジは 1 回きり。同時に 2 回通っても、消せた方だけがセッションを得る

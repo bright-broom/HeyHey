@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync, randomBytes } from "node:crypto";
 
 /**
  * DB に置く秘密（2 段階認証の鍵）の暗号化。AES-256-GCM。
@@ -46,4 +46,13 @@ export function open(sealed: string, aad: string): string {
   d.setAAD(Buffer.from(aad));
   d.setAuthTag(Buffer.from(tag, "base64url"));
   return Buffer.concat([d.update(Buffer.from(ct, "base64url")), d.final()]).toString("utf8");
+}
+
+/**
+ * 鍵付きハッシュ（HMAC-SHA256）。リカバリーコードのように桁数が限られる秘密を、
+ * DB のダンプだけから総当たりで復元されないようにする。用途ごとに鍵を分ける（HKDF）。
+ */
+export function keyedHash(purpose: string, data: string): string {
+  const k = Buffer.from(hkdfSync("sha256", key(), Buffer.alloc(0), `kakomi:${purpose}`, 32));
+  return createHmac("sha256", k).update(data).digest("hex");
 }

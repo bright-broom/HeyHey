@@ -3,7 +3,7 @@
  *   npm run mfa:reset -- someone@example.com "本人から電話で依頼。社員証で本人確認済み"
  *
  * 本人確認は運営者が画面の外で行うこと。解除すると全端末からログアウトされ、監査ログに残る。
- * 管理者を解除した場合、本人が設定し直すまで管理機能は使えない。
+ * 管理者を解除した場合、本人が設定し直すまで管理機能は使えない（設定し直すには npm run mfa:ticket のチケットが要る）。
  */
 import { eq } from "drizzle-orm";
 import { closeDb, getDb } from "../src/server/db/client";
@@ -24,6 +24,7 @@ async function main() {
   }
   await resetMfaByOperator(db, u.id, reason);
   console.log(`✓ ${email}（${u.role}）の 2 段階認証を解除し、全端末からログアウトさせました`);
+  if (u.role !== "member") console.log("  設定し直すには設定チケットが要ります：npm run mfa:ticket -- " + email);
   await closeDb();
 }
 

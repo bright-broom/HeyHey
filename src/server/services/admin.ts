@@ -16,6 +16,7 @@ import { assertAdmin, assertOwner } from "../lib/policy";
 import type { Viewer } from "../lib/viewer";
 import { audit } from "./audit";
 import { deleteUserSessions } from "./auth";
+import { mfaEnabled } from "./mfa";
 import { appUrl, sendMail } from "./mailer";
 
 // ───────── 入会審査 ─────────
@@ -252,6 +253,10 @@ export async function setRole(db: Db, viewer: Viewer, userId: string, role: "mem
   const target = await loadTarget(db, userId);
   if (target.id === viewer.id || target.role === "owner") throw forbidden("オーナーの権限は変更できません。");
   if (target.status !== "active") throw conflict("承認済みの会員のみ権限を変更できます。");
+  // 任命の時点で 2 段階認証が済んでいれば、管理者の設定にチケットが要らず、未設定の管理者も生まれない
+  if (role === "admin" && target.role !== "admin" && !(await mfaEnabled(db, userId))) {
+    throw conflict("管理者に任命できるのは、2 段階認証を設定済みの会員だけです。本人に設定してもらってから任命してください。");
+  }
   await db.transaction(async (tx) => {
     await tx.update(users).set({ role, updatedAt: new Date() }).where(eq(users.id, userId));
     await audit(tx, { actorId: viewer.id, action: "user.set_role", targetType: "user", targetId: userId, meta: { from: target.role, to: role } });

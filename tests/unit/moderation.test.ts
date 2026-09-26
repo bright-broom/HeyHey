@@ -108,7 +108,7 @@ describe("管理権限の境界", () => {
   it("管理者の任命はオーナーだけ。一般会員は招待枠を変えられない", async () => {
     const owner = await makeUser(d, { role: "owner" });
     const admin = await makeUser(d, { role: "admin" });
-    const m = await makeUser(d);
+    const m = await makeUser(d, { mfa: true });
     await expect(setRole(d, admin.viewer, m.user.id, "admin")).rejects.toMatchObject({ code: "forbidden" });
     await setRole(d, owner.viewer, m.user.id, "admin");
     const [u] = await d.select().from(users).where(eq(users.id, m.user.id));

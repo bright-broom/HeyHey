@@ -97,7 +97,7 @@ export const sessions = pgTable(
 );
 
 /**
- * 2 段階認証（TOTP）。enabledAt が null の行は「設定途中」（QR を表示して確認コード待ち）。
+ * 2 段階認証（TOTP）。行があれば有効。設定途中の鍵は DB に置かない（services/mfa の setupToken）。
  * 秘密鍵は MFA_ENCRYPTION_KEY で暗号化して持つ（lib/secretbox）。
  */
 export const userMfa = pgTable("user_mfa", {
@@ -105,13 +105,13 @@ export const userMfa = pgTable("user_mfa", {
     .primaryKey()
     .references(() => users.id, { onDelete: "cascade" }),
   secretEnc: text("secret_enc").notNull(),
-  enabledAt: ts("enabled_at"),
+  enabledAt: ts("enabled_at").notNull().defaultNow(),
   /** 最後に受け付けた TOTP のステップ。これ以下は受け付けない（リプレイ防止） */
   lastUsedStep: integer("last_used_step"),
   createdAt: createdAt(),
 });
 
-/** リカバリーコード。ハッシュだけを持ち、1 回使うと usedAt が入る */
+/** リカバリーコード。サーバー鍵での HMAC だけを持ち、1 回使うと usedAt が入る */
 export const mfaRecoveryCodes = pgTable(
   "mfa_recovery_codes",
   {

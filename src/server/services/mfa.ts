@@ -1,12 +1,12 @@
-import { createHash, randomInt } from "node:crypto";
-import { and, count, eq, isNull, lt, ne, or } from "drizzle-orm";
+import { randomInt } from "node:crypto";
+import { and, count, eq, gt, isNull, lt, ne, or } from "drizzle-orm";
 import type { Db, DbOrTx } from "../db/client";
-import { mfaRecoveryCodes, sessions, userMfa, users } from "../db/schema";
+import { emailTokens, mfaRecoveryCodes, sessions, userMfa, users } from "../db/schema";
 import { AppError, conflict, forbidden, invalid } from "../lib/errors";
 import { verifyPassword } from "../lib/password";
 import { assertMember, hasAdminRole } from "../lib/policy";
-import { MissingKeyError, open, seal } from "../lib/secretbox";
-import { hashToken } from "../lib/tokens";
+import { keyedHash, MissingKeyError, open, seal } from "../lib/secretbox";
+import { hashToken, newToken } from "../lib/tokens";
 import { newTotpSecret, otpauthUri, verifyTotp } from "../lib/totp";
 import type { Viewer } from "../lib/viewer";
 import { audit } from "./audit";
@@ -15,6 +15,10 @@ import { consume } from "./ratelimit";
 /**
  * 2 段階認証（F-04）。認証アプリの TOTP を基本にし、端末をなくしたとき用にリカバリーコードを出す。
  * 管理者以上は必須（policy.isAdmin が mfa を見る）、一般会員は任意。
+ *
+ * 管理者以上の設定には、運営者が発行する 1 回限りの「設定チケット」も要る。
+ * パスワードだけが漏れた未設定の管理者アカウントで、攻撃者が先に 2 段階認証を設定して
+ * 管理権限を得る（しかも本人を締め出す）ことを防ぐため。
  */
 
 export const RECOVERY_CODE_COUNT = 10;
@@ -22,10 +26,15 @@ export const RECOVERY_CODE_COUNT = 10;
 const RECOVERY_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
 const SETUP_LIMIT = 10;
 const SETUP_WINDOW_SEC = 15 * 60;
+/** 「設定を始める」から確認までの猶予 */
+const SETUP_TTL_MS = 15 * 60 * 1000;
+export const ENROLL_TICKET_TTL_MIN = 30;
+const TICKET_PURPOSE = "mfa_enroll";
 
 export const sealAad = (userId: string) => `user_mfa:${userId}`;
+const setupAad = (userId: string) => `mfa_setup:${userId}`;
 const normalizeRecovery = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-const hashRecovery = (userId: string, code: string) => createHash("sha256").update(`${userId}:${normalizeRecovery(code)}`).digest("hex");
+const hashRecovery = (userId: string, code: string) => keyedHash("recovery-code", `${userId}:${normalizeRecovery(code)}`);
 
 function newRecoveryCodes(): string[] {
   return Array.from({ length: RECOVERY_CODE_COUNT }, () => {
@@ -34,92 +43,112 @@ function newRecoveryCodes(): string[] {
   });
 }
 
-function sealSecret(userId: string, secret: string): string {
+/** 鍵の設定漏れは、画面には運営者向けの一般的な文言で出す */
+function withKey<T>(fn: () => T): T {
   try {
-    return seal(secret, sealAad(userId));
+    return fn();
   } catch (e) {
     if (e instanceof MissingKeyError) throw new AppError("invalid", "サーバーの設定が不足しているため、2 段階認証を設定できません。運営者に連絡してください。");
     throw e;
   }
 }
 
+const tooMany = () => new AppError("rate_limited", "試行回数が上限に達しました。15 分ほど待ってから再度お試しください。");
+
 export async function mfaEnabled(db: DbOrTx, userId: string): Promise<boolean> {
-  const [row] = await db.select({ enabledAt: userMfa.enabledAt }).from(userMfa).where(eq(userMfa.userId, userId));
-  return !!row?.enabledAt;
+  const [row] = await db.select({ userId: userMfa.userId }).from(userMfa).where(eq(userMfa.userId, userId));
+  return !!row;
 }
 
-export type MfaState = {
-  enabled: boolean;
-  enabledAt: Date | null;
-  recoveryRemaining: number;
-  /** 設定途中なら、QR にする URI と手入力用の鍵 */
-  pending: { secret: string; uri: string } | null;
-};
+export type MfaState = { enabled: boolean; enabledAt: Date | null; recoveryRemaining: number };
 
 export async function getMfaState(db: Db, viewer: Viewer): Promise<MfaState> {
   assertMember(viewer);
-  const [row] = await db
-    .select({ mfa: userMfa, email: users.email })
-    .from(users)
-    .leftJoin(userMfa, eq(userMfa.userId, users.id))
-    .where(eq(users.id, viewer.id));
-  const mfa = row?.mfa;
-  if (!mfa) return { enabled: false, enabledAt: null, recoveryRemaining: 0, pending: null };
-  if (mfa.enabledAt) {
-    const [{ n } = { n: 0 }] = await db
-      .select({ n: count() })
-      .from(mfaRecoveryCodes)
-      .where(and(eq(mfaRecoveryCodes.userId, viewer.id), isNull(mfaRecoveryCodes.usedAt)));
-    return { enabled: true, enabledAt: mfa.enabledAt, recoveryRemaining: n, pending: null };
-  }
-  const secret = open(mfa.secretEnc, sealAad(viewer.id));
-  return { enabled: false, enabledAt: null, recoveryRemaining: 0, pending: { secret, uri: otpauthUri(secret, row.email) } };
-}
-
-/** 設定を始める：新しい鍵を作り「設定途中」として保存する。有効化済みなら何もしない */
-export async function beginEnrollment(db: Db, viewer: Viewer): Promise<{ secret: string; uri: string }> {
-  assertMember(viewer);
-  const [u] = await db.select({ email: users.email }).from(users).where(eq(users.id, viewer.id));
-  const secret = newTotpSecret();
-  const secretEnc = sealSecret(viewer.id, secret);
-  const [row] = await db
-    .insert(userMfa)
-    .values({ userId: viewer.id, secretEnc })
-    .onConflictDoUpdate({ target: userMfa.userId, set: { secretEnc, lastUsedStep: null, createdAt: new Date() }, setWhere: isNull(userMfa.enabledAt) })
-    .returning({ userId: userMfa.userId });
-  if (!row) throw conflict("2 段階認証はすでに有効です。");
-  return { secret, uri: otpauthUri(secret, u!.email) };
+  const [mfa] = await db.select({ enabledAt: userMfa.enabledAt }).from(userMfa).where(eq(userMfa.userId, viewer.id));
+  if (!mfa) return { enabled: false, enabledAt: null, recoveryRemaining: 0 };
+  const [{ n } = { n: 0 }] = await db
+    .select({ n: count() })
+    .from(mfaRecoveryCodes)
+    .where(and(eq(mfaRecoveryCodes.userId, viewer.id), isNull(mfaRecoveryCodes.usedAt)));
+  return { enabled: true, enabledAt: mfa.enabledAt, recoveryRemaining: n };
 }
 
 /**
- * 設定を完了する。パスワードと認証アプリのコードの両方を確かめる
- * （乗っ取ったセッションだけで 2 段階認証を仕掛け、本人を締め出すことを防ぐ）。
+ * 設定を始める：新しい鍵を作り、QR 用の URI と「封をした設定トークン」を返す。
+ * 設定途中の鍵は DB に置かず、始めた人の画面にだけ渡す。乗っ取ったセッションで鍵を仕込んでおき、
+ * 本人にそれを読み取らせる、という手口を防ぐため（毎回新しい鍵になり、15 分で失効する）。
+ */
+export async function beginEnrollment(db: Db, viewer: Viewer): Promise<{ secret: string; uri: string; setupToken: string }> {
+  assertMember(viewer);
+  if (await mfaEnabled(db, viewer.id)) throw conflict("2 段階認証はすでに有効です。");
+  const [u] = await db.select({ email: users.email }).from(users).where(eq(users.id, viewer.id));
+  const secret = newTotpSecret();
+  const setupToken = withKey(() => seal(JSON.stringify({ s: secret, iat: Date.now() }), setupAad(viewer.id)));
+  return { secret, uri: otpauthUri(secret, u!.email), setupToken };
+}
+
+function openSetupToken(userId: string, token: string): string | null {
+  try {
+    const { s, iat } = JSON.parse(open(token, setupAad(userId))) as { s: string; iat: number };
+    return Date.now() - iat <= SETUP_TTL_MS ? s : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 管理者以上が設定するときに要る、1 回限りのチケット（運営者が scripts/mfa-ticket.ts で発行） */
+export async function issueEnrollmentTicket(db: Db, userId: string): Promise<{ ticket: string; expiresAt: Date }> {
+  const ticket = newToken();
+  const expiresAt = new Date(Date.now() + ENROLL_TICKET_TTL_MIN * 60 * 1000);
+  await db.insert(emailTokens).values({ tokenHash: hashToken(ticket), userId, purpose: TICKET_PURPOSE, expiresAt });
+  await audit(db, { actorId: null, action: "mfa.ticket_issue", targetType: "user", targetId: userId });
+  return { ticket, expiresAt };
+}
+
+/**
+ * 設定を完了する。パスワードと認証アプリのコードの両方を確かめ、管理者以上はチケットも消費する。
  * 有効化したら、この端末以外のセッションはすべて破棄する。
  */
 export async function confirmEnrollment(
   db: Db,
   viewer: Viewer,
-  input: { password: string; code: string; keepSessionToken?: string },
+  input: { password: string; code: string; setupToken: string; ticket?: string; keepSessionToken?: string },
 ): Promise<{ recoveryCodes: string[] }> {
   assertMember(viewer);
-  if (!(await consume(db, `mfa:setup:${viewer.id}`, SETUP_LIMIT, SETUP_WINDOW_SEC))) {
-    throw new AppError("rate_limited", "試行回数が上限に達しました。15 分ほど待ってから再度お試しください。");
-  }
+  if (!(await consume(db, `mfa:setup:${viewer.id}`, SETUP_LIMIT, SETUP_WINDOW_SEC))) throw tooMany();
   const [u] = await db.select({ passwordHash: users.passwordHash }).from(users).where(eq(users.id, viewer.id));
   if (!u || !(await verifyPassword(input.password, u.passwordHash))) throw invalid("パスワードが正しくありません。");
-  const [pending] = await db.select().from(userMfa).where(and(eq(userMfa.userId, viewer.id), isNull(userMfa.enabledAt)));
-  if (!pending) throw invalid("設定を最初からやり直してください。");
-  const step = verifyTotp(open(pending.secretEnc, sealAad(viewer.id)), input.code);
+  const secret = withKey(() => openSetupToken(viewer.id, input.setupToken));
+  if (!secret) throw invalid("設定の有効期限が切れました。「設定を始める」からやり直してください。");
+  const step = verifyTotp(secret, input.code);
   if (step === null) throw invalid("確認コードが正しくありません。認証アプリに表示されている 6 桁の数字を入力してください。");
+  const needsTicket = hasAdminRole(viewer);
+  if (needsTicket && !input.ticket?.trim()) throw invalid("管理者の設定には、運営者が発行する設定チケットが必要です。");
 
   const codes = newRecoveryCodes();
   await db.transaction(async (tx) => {
+    if (needsTicket) {
+      const [used] = await tx
+        .update(emailTokens)
+        .set({ usedAt: new Date() })
+        .where(
+          and(
+            eq(emailTokens.tokenHash, hashToken(input.ticket!.trim())),
+            eq(emailTokens.userId, viewer.id),
+            eq(emailTokens.purpose, TICKET_PURPOSE),
+            isNull(emailTokens.usedAt),
+            gt(emailTokens.expiresAt, new Date()),
+          ),
+        )
+        .returning({ userId: emailTokens.userId });
+      if (!used) throw invalid("設定チケットが正しくないか、有効期限が切れています。");
+    }
     const [ok] = await tx
-      .update(userMfa)
-      .set({ enabledAt: new Date(), lastUsedStep: step })
-      .where(and(eq(userMfa.userId, viewer.id), isNull(userMfa.enabledAt), eq(userMfa.secretEnc, pending.secretEnc)))
+      .insert(userMfa)
+      .values({ userId: viewer.id, secretEnc: seal(secret, sealAad(viewer.id)), lastUsedStep: step })
+      .onConflictDoNothing()
       .returning({ userId: userMfa.userId });
-    if (!ok) throw invalid("設定を最初からやり直してください。");
+    if (!ok) throw conflict("2 段階認証はすでに有効です。");
     await tx.delete(mfaRecoveryCodes).where(eq(mfaRecoveryCodes.userId, viewer.id));
     await tx.insert(mfaRecoveryCodes).values(codes.map((c) => ({ userId: viewer.id, codeHash: hashRecovery(viewer.id, c) })));
     await tx
@@ -136,7 +165,7 @@ export async function confirmEnrollment(
  */
 export async function checkSecondFactor(db: DbOrTx, userId: string, input: string): Promise<"totp" | "recovery" | null> {
   const [mfa] = await db.select().from(userMfa).where(eq(userMfa.userId, userId));
-  if (!mfa?.enabledAt) return null;
+  if (!mfa) return null;
   const trimmed = input.trim();
   if (/^\d[\d\s]*$/.test(trimmed)) {
     const step = verifyTotp(open(mfa.secretEnc, sealAad(userId)), trimmed, { afterStep: mfa.lastUsedStep });
@@ -162,9 +191,7 @@ export async function checkSecondFactor(db: DbOrTx, userId: string, input: strin
 /** リカバリーコードを作り直す（古いものはすべて無効）。認証アプリのコードが必要 */
 export async function regenerateRecoveryCodes(db: Db, viewer: Viewer, input: { code: string }): Promise<{ recoveryCodes: string[] }> {
   assertMember(viewer);
-  if (!(await consume(db, `mfa:setup:${viewer.id}`, SETUP_LIMIT, SETUP_WINDOW_SEC))) {
-    throw new AppError("rate_limited", "試行回数が上限に達しました。15 分ほど待ってから再度お試しください。");
-  }
+  if (!(await consume(db, `mfa:setup:${viewer.id}`, SETUP_LIMIT, SETUP_WINDOW_SEC))) throw tooMany();
   if (!/^\d[\d\s]*$/.test(input.code.trim())) throw invalid("認証アプリに表示されている 6 桁の数字を入力してください。");
   const codes = newRecoveryCodes();
   await db.transaction(async (tx) => {
@@ -180,9 +207,7 @@ export async function regenerateRecoveryCodes(db: Db, viewer: Viewer, input: { c
 export async function disableMfa(db: Db, viewer: Viewer, input: { password: string; code: string }): Promise<void> {
   assertMember(viewer);
   if (hasAdminRole(viewer)) throw forbidden("管理者は 2 段階認証を無効にできません。");
-  if (!(await consume(db, `mfa:setup:${viewer.id}`, SETUP_LIMIT, SETUP_WINDOW_SEC))) {
-    throw new AppError("rate_limited", "試行回数が上限に達しました。15 分ほど待ってから再度お試しください。");
-  }
+  if (!(await consume(db, `mfa:setup:${viewer.id}`, SETUP_LIMIT, SETUP_WINDOW_SEC))) throw tooMany();
   const [u] = await db.select({ passwordHash: users.passwordHash }).from(users).where(eq(users.id, viewer.id));
   if (!u || !(await verifyPassword(input.password, u.passwordHash))) throw invalid("パスワードが正しくありません。");
   await db.transaction(async (tx) => {

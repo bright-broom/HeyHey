@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import sharp from "sharp";
 import { totpCode, totpStep } from "../../src/server/lib/totp";
@@ -78,6 +79,8 @@ test("オーナーも 2 段階認証を設定するまで管理画面に入れ�
   const usedStep = totpStep(Date.now());
   await ownerPage.getByLabel("認証アプリの 6 桁のコード").fill(totpCode(secret, usedStep));
   await ownerPage.getByLabel("パスワード").fill(OWNER.password);
+  // 管理者以上は、運営者が発行した設定チケットも要る（playwright.config.ts で発行済み）
+  await ownerPage.getByLabel("設定チケット").fill(fs.readFileSync(".data/e2e/owner-ticket.txt", "utf8").trim());
   await ownerPage.getByRole("button", { name: "確認して有効にする" }).click();
   await expect(ownerPage.getByTestId("recovery-codes").locator("li")).toHaveCount(10);
   await ownerPage.getByRole("link", { name: "控えました" }).click();

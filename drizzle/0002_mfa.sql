@@ -16,7 +16,7 @@ CREATE TABLE "mfa_recovery_codes" (
 CREATE TABLE "user_mfa" (
 	"user_id" uuid PRIMARY KEY NOT NULL,
 	"secret_enc" text NOT NULL,
-	"enabled_at" timestamp with time zone,
+	"enabled_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"last_used_step" integer,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );

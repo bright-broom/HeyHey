@@ -22,7 +22,8 @@
     "demo": "npm run db:migrate && npm run db:seed -- --demo",
     "vercel-build": "npm run db:migrate && next build",
     "test:pg": "vitest run --config vitest.pg.config.mts",
-    "mfa:reset": "tsx --conditions=react-server scripts/reset-mfa.ts"
+    "mfa:reset": "tsx --conditions=react-server scripts/reset-mfa.ts",
+    "mfa:ticket": "tsx --conditions=react-server scripts/mfa-ticket.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",

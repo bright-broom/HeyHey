@@ -1,5 +1,5 @@
 {
-  "id": "0a90c61c-7da5-40c6-8b32-f585daff1167",
+  "id": "2e87882d-af49-4c4a-b97e-98a91eb6e8f3",
   "prevId": "a09f6f9c-74d6-4c77-9237-2b2c9d840369",
   "version": "7",
   "dialect": "postgresql",
@@ -1687,7 +1687,8 @@
           "name": "enabled_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true,
+          "default": "now()"
         },
         "last_used_step": {
           "name": "last_used_step",
