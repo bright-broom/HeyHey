@@ -243,7 +243,12 @@ export const groupMembers = pgTable(
     createdAt: createdAt(),
     approvedAt: ts("approved_at"),
   },
-  (t) => [primaryKey({ columns: [t.groupId, t.userId] }), index("group_members_user_idx").on(t.userId)],
+  (t) => [
+    primaryKey({ columns: [t.groupId, t.userId] }),
+    index("group_members_user_idx").on(t.userId),
+    // オーナーは 1 グループに 1 人（移譲・管理者の指定が同時に起きても、DB が 2 人目を拒む）
+    uniqueIndex("group_members_one_owner_key").on(t.groupId).where(sql`${t.role} = 'owner'`),
+  ],
 );
 
 /** グループから外された人。管理役が解除するまで、参加も申請もできない */

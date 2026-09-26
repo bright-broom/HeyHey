@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "group_members_one_owner_key" ON "group_members" USING btree ("group_id") WHERE "group_members"."role" = 'owner';

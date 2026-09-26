@@ -235,6 +235,7 @@ export async function getPostForEdit(db: Db, viewer: Viewer, postId: string) {
   assertMember(viewer);
   const p = await ownPost(db, viewer, postId).catch(() => null);
   if (!p) return null;
+  if (p.groupId && !(await assertStillInGroup(db, viewer, p.groupId).then(() => true, () => false))) return null;
   return { id: p.id, visibility: p.visibility, inGroup: !!p.groupId, body: maskHiddenMentions(p.body, await mentionNames(db, viewer, [p.body])) };
 }
 
@@ -358,9 +359,17 @@ async function ownPost(db: Db, viewer: Viewer, postId: string) {
   return p;
 }
 
+/** グループの投稿は、いまそのグループのメンバーであるときだけ編集できる（外された後に書き換えさせない） */
+async function assertStillInGroup(db: Db, viewer: Viewer, groupId: string | null) {
+  if (!groupId) return;
+  const [ok] = await db.select({ one: sql`1` }).from(users).where(and(eq(users.id, viewer.id), activeInOpenGroup(viewer.id, sql`${groupId}::uuid`)));
+  if (!ok) throw notFound();
+}
+
 export async function updatePost(db: Db, viewer: Viewer, postId: string, input: { body: string; visibility: string }) {
   assertMember(viewer);
   const p = await ownPost(db, viewer, postId);
+  await assertStillInGroup(db, viewer, p.groupId);
   const parsed = postSchema.safeParse(input);
   if (!parsed.success) throw invalid(parsed.error.issues[0]?.message ?? "入力内容を確認してください。");
   // 編集画面では見えない相手へのメンションを目印にしてあるので、保存前に元のメンションへ戻す

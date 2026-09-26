@@ -23,7 +23,7 @@ import {
 } from "@/server/services/groups";
 import { mediaForViewer } from "@/server/services/media";
 import { withdraw } from "@/server/services/members";
-import { addComment, createPost, getPost, listFeed, toggleReaction } from "@/server/services/posts";
+import { addComment, createPost, deletePost, getPost, getPostForEdit, listFeed, toggleReaction, updatePost } from "@/server/services/posts";
 import { db, makeUser, PASSWORD } from "./helpers";
 
 let d: Db;
@@ -106,6 +106,22 @@ describe("グループの投稿は、アクティブなメンバーにだけ見�
     await unbanMember(d, owner.viewer, gid, member.user.id);
     expect(await joinGroup(d, member.viewer, gid)).toBe("joined");
     expect(await getPost(d, member.viewer, mine)).not.toBeNull();
+  });
+
+  it("外された人は、自分の古いグループ投稿も編集できない（削除はできる）", async () => {
+    const owner = await makeUser(d);
+    const member = await makeUser(d);
+    const other = await makeUser(d);
+    const { id: gid } = await newGroup(owner);
+    await joinGroup(d, member.viewer, gid);
+    await joinGroup(d, other.viewer, gid);
+    const { id: mine } = await createPost(d, member.viewer, { body: "元の本文", visibility: "members", groupId: gid });
+    await removeMember(d, owner.viewer, gid, member.user.id);
+    await expect(updatePost(d, member.viewer, mine, { body: `${mentionToken("x", other.user.id)} 書き換え`, visibility: "members" })).rejects.toMatchObject({ code: "not_found" });
+    expect(await getPostForEdit(d, member.viewer, mine)).toBeNull();
+    expect((await getPost(d, owner.viewer, mine))!.body).toBe("元の本文");
+    await deletePost(d, member.viewer, mine);
+    expect(await getPost(d, owner.viewer, mine)).toBeNull();
   });
 
   it("自分から退出した人は、また参加できる", async () => {
@@ -256,6 +272,18 @@ describe("グループの管理", () => {
     expect(roles[owner.user.id]).toBe("moderator");
     await setGroupArchived(d, admin.viewer, gid, false);
     expect((await getGroup(d, member.viewer, gid)).isOwner).toBe(true);
+  });
+
+  it("サイトの管理者は、自分自身や、オーナーが活動中のグループには指定できない。オーナーは DB でも 1 人に限る", async () => {
+    const owner = await makeUser(d);
+    const member = await makeUser(d);
+    const admin = await makeUser(d, { role: "admin" });
+    const { id: gid } = await newGroup(owner);
+    await joinGroup(d, member.viewer, gid);
+    await joinGroup(d, admin.viewer, gid);
+    await expect(assignGroupOwnerByAdmin(d, admin.viewer, gid, admin.user.id)).rejects.toMatchObject({ code: "invalid" });
+    await expect(assignGroupOwnerByAdmin(d, admin.viewer, gid, member.user.id)).rejects.toMatchObject({ code: "conflict" });
+    await expect(d.update(groupMembers).set({ role: "owner" }).where(and(eq(groupMembers.groupId, gid), eq(groupMembers.userId, member.user.id)))).rejects.toThrow();
   });
 
   it("役割の書き換えはオーナーの行に及ばない（同時に移譲された場合も）", async () => {
