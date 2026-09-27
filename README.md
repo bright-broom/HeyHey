@@ -15,13 +15,13 @@ Facebook の「フィード・投稿・コメント・グループ・イベン�
 ![Vercel](https://img.shields.io/badge/Vercel-Functions_%2B_Blob-000?logo=vercel)
 ![Tests](https://img.shields.io/badge/tests-211_unit_%2B_11_E2E-2e7d32)
 
-[すぐ試す](#-すぐ試す) · [アーキテクチャ](#-アーキテクチャ) · [見える範囲の設計](#-見える範囲はsqlの条件式ひとつ) · [多層防御](#-多層防御) · [テスト](#-テスト) · [設計記録（ADR）](docs/adr)
+[すぐ試す](#すぐ試す) · [アーキテクチャ](#アーキテクチャ) · [見える範囲の設計](#見える範囲はsql-の条件式ひとつ) · [多層防御](#多層防御) · [テスト](#テスト) · [設計記録（ADR）](docs/adr)
 
 </div>
 
 ---
 
-## ✨ ひとことで
+## ひとことで
 
 > **「見えてはいけない人に、見えてしまうこと」を、仕組みで起こせなくした SNS。**
 
@@ -30,12 +30,12 @@ Facebook の「フィード・投稿・コメント・グループ・イベン�
 
 | | |
 | --- | --- |
-| 🔐 **入口は 1 本** | 招待リンク → メール確認 → 管理者の審査 → 規約同意。一般公開の登録口はない |
-| 🧭 **見える範囲は SQL ひとつ** | `visiblePost` をフィード・詳細・画像・通知・検索・メンションの **全経路** が通る |
-| 🧾 **消せない監査ログ** | DB トリガーで追記専用。管理者でもアプリのバグでも書き換えられない |
-| 📷 **位置情報を残さない** | 画像は再エンコードで EXIF ごと、動画は GPS トラックと撮影日時まで消す |
-| ✉️ **メールに中身を書かない** | 通知メールは件数とリンクだけ。本文も人の名前も外へ出さない |
-| 🤐 **管理者も DM を読めない** | 1 対 1 メッセージは当事者 2 人だけ |
+| **入口は 1 本** | 招待リンク → メール確認 → 管理者の審査 → 規約同意。一般公開の登録口はない |
+| **見える範囲は SQL ひとつ** | `visiblePost` をフィード・詳細・画像・通知・検索・メンションの **全経路** が通る |
+| **消せない監査ログ** | DB トリガーで追記専用。管理者でもアプリのバグでも書き換えられない |
+| **位置情報を残さない** | 画像は再エンコードで EXIF ごと、動画は GPS トラックと撮影日時まで消す |
+| **メールに中身を書かない** | 通知メールは件数とリンクだけ。本文も人の名前も外へ出さない |
+| **管理者も DM を読めない** | 1 対 1 メッセージは当事者 2 人だけ |
 
 ### 数字で見る
 
@@ -45,7 +45,7 @@ Facebook の「フィード・投稿・コメント・グループ・イベン�
 
 ---
 
-## 🚀 すぐ試す
+## すぐ試す
 
 Node.js 20.9 以上だけで動きます。**DB はアプリに組み込まれた PostgreSQL（PGlite）** なので、Docker も DB サーバーもいりません。
 
@@ -83,16 +83,16 @@ npm run dev       # http://localhost:3000
 
 ---
 
-## 🏗 アーキテクチャ
+## アーキテクチャ
 
 ```mermaid
 flowchart LR
-    subgraph Browser["🌐 ブラウザ"]
+    subgraph Browser["ブラウザ"]
         UI["React 19"]
         UP["添付の直接アップロード"]
     end
 
-    subgraph Vercel["▲ Vercel Functions（sin1）"]
+    subgraph Vercel["Vercel Functions（sin1）"]
         direction TB
         RSC["ページ<br/>Server Components"]
         SA["Server Actions"]
@@ -107,9 +107,9 @@ flowchart LR
         SVC --> VIS
     end
 
-    DB[("🐘 PostgreSQL<br/>Neon（sin1）")]
-    BLOB[("🗄 Vercel Blob<br/>private")]
-    MAIL["✉️ Resend"]
+    DB[("PostgreSQL<br/>Neon（sin1）")]
+    BLOB[("Vercel Blob<br/>private")]
+    MAIL["Resend"]
     CRON["⏰ Vercel Cron<br/>毎日 3:00 JST"]
 
     UI --> RSC
@@ -130,7 +130,7 @@ flowchart LR
 
 ---
 
-## 🚪 入口は 1 本だけ
+## 入口は 1 本だけ
 
 ```mermaid
 sequenceDiagram
@@ -170,7 +170,7 @@ stateDiagram-v2
 
 ---
 
-## 🧭 見える範囲は、SQL の条件式ひとつ
+## 見える範囲は、SQL の条件式ひとつ
 
 このプロダクトでいちばん大事な関数が、[`src/server/lib/visibility.ts`](src/server/lib/visibility.ts) の `visiblePost` です。
 **フィード・投稿詳細・プロフィール・コメント・リアクション・通報・画像と動画の配信・通知・メンション・タグ・検索** のすべてが、この 1 つの条件式を通ります。
@@ -179,10 +179,10 @@ stateDiagram-v2
 ```mermaid
 flowchart TD
     Q{"この投稿は<br/>viewer に見えるか"} --> D{"削除済み？"}
-    D -- はい --> NO["❌ 見えない（404）"]
+    D -- はい --> NO["見えない（404）"]
     D -- いいえ --> OWN{"自分の投稿？"}
     OWN -- はい --> G1{"グループの投稿なら<br/>いまもメンバー？"}
-    G1 -- はい --> YES["✅ 見える"]
+    G1 -- はい --> YES["見える"]
     G1 -- いいえ --> NO
     OWN -- いいえ --> H{"非表示処分中？"}
     H -- はい --> NO
@@ -205,17 +205,17 @@ flowchart TD
 
 ---
 
-## 👥 役割は 2 つ、ルールは 1 つ
+## 役割は 2 つ、ルールは 1 つ
 
 ```mermaid
 flowchart LR
     subgraph Roles["役割は 2 つだけ"]
-        MEM["👤 会員<br/>投稿・コメント・メッセージ<br/>イベント・グループ・招待・通報"]
-        ADM["🛡 管理者<br/>会員のすべて ＋<br/>審査・通報対応・非表示・停止<br/>管理者の任命と解任・監査ログ"]
+        MEM["会員<br/>投稿・コメント・メッセージ<br/>イベント・グループ・招待・通報"]
+        ADM["管理者<br/>会員のすべて ＋<br/>審査・通報対応・非表示・停止<br/>管理者の任命と解任・監査ログ"]
         MEM -. "任命" .-> ADM
     end
     subgraph Rule["ルールは 1 つ"]
-        OWN["✍️ 作ったものは<br/>作った人が管理する"]
+        OWN["作ったものは<br/>作った人が管理する"]
         OWN --- P["投稿・コメント"]
         OWN --- E["イベント"]
         OWN --- GR["グループ<br/>作った人＝代表（交代できる）"]
@@ -228,7 +228,7 @@ flowchart LR
 
 ---
 
-## 📎 大きなファイルは、アプリを通さずに上げる
+## 大きなファイルは、アプリを通さずに上げる
 
 Vercel Functions のリクエスト本文は **4.5MB まで**。そこで画像はブラウザで縮めてから送り、動画とファイルはブラウザから **Blob の一時置き場へ直接** 上げます。
 投稿するときにサーバーが **持ち主・大きさ・中身** を確かめ、動画のメタデータを消してから本置き場に移します。
@@ -272,7 +272,7 @@ sequenceDiagram
 
 ---
 
-## 🛡 多層防御
+## 多層防御
 
 ```mermaid
 flowchart TB
@@ -299,7 +299,7 @@ flowchart TB
 
 ---
 
-## 🗂 データモデル（主なもの）
+## データモデル（主なもの）
 
 ```mermaid
 erDiagram
@@ -342,13 +342,13 @@ erDiagram
 
 ---
 
-## 🧪 テスト
+## テスト
 
 ```mermaid
 flowchart LR
-    U["🧩 単体・結合 211 件<br/>PGlite（毎回まっさらな DB）"] --> PG["🐘 同じ 211 件を<br/>実 PostgreSQL で"]
-    PG --> E["🌐 E2E 11 件<br/>本番ビルド × Playwright"]
-    E --> R["🔍 独立した<br/>セキュリティレビュー"]
+    U["単体・結合 211 件<br/>PGlite（毎回まっさらな DB）"] --> PG["同じ 211 件を<br/>実 PostgreSQL で"]
+    PG --> E["E2E 11 件<br/>本番ビルド × Playwright"]
+    E --> R["独立した<br/>セキュリティレビュー"]
     R -. "指摘はすべて回帰テストに" .-> U
 ```
 
@@ -369,7 +369,7 @@ npm run verify                                               # 上記すべて
 
 ---
 
-## ☁️ 本番（Vercel）
+## 本番（Vercel）
 
 本番は https://kakomi.vercel.app（Vercel `brightbroom-projects/kakomi`）。**アプリ・DB・Blob をすべてシンガポール（sin1）に置き**、往復の遅延をなくしています。
 
@@ -434,7 +434,7 @@ Vercel 以外で動かすときは `DATABASE_URL` を設定し、ファイルは
 
 ---
 
-## 📋 要件定義書との対応
+## 要件定義書との対応
 
 [要件定義書](docs/requirements.md) の **Must 12・Should 6・Could 4 の全 22 機能** を実装しています。
 
@@ -494,7 +494,7 @@ flowchart LR
 
 ---
 
-## ⚠️ 既知の制限
+## 既知の制限
 
 - メッセージは即時には届かない（開いている間、15 秒ごとに取り直す）
 - 動画は受け取った形式のまま配る（変換しない）。fragmented MP4 は受け付けない
