@@ -3,6 +3,7 @@ import {
   bigserial,
   boolean,
   check,
+  date,
   index,
   integer,
   jsonb,
@@ -500,6 +501,21 @@ export const mailOutbox = pgTable("mail_outbox", {
   subject: text("subject").notNull(),
   body: text("body").notNull(),
   provider: text("provider").notNull(),
+  createdAt: createdAt(),
+});
+
+/**
+ * 利用状況の日ごとの記録（毎日の定期処理で 1 行）。人数だけを持ち、誰がかは持たない。
+ * 最終アクセス日時は上書きされるので、週次アクティブ率の推移はここにしか残らない（Phase を進める判断に使う）。
+ */
+export const activitySnapshots = pgTable("activity_snapshots", {
+  /** 日本時間の日付 */
+  day: date("day", { mode: "string" }).primaryKey(),
+  activeMembers: integer("active_members").notNull(),
+  /** 記録した時点から直近 7 日にアクセスした会員 */
+  weeklyActiveMembers: integer("weekly_active_members").notNull(),
+  postsWeek: integer("posts_week").notNull(),
+  commentsWeek: integer("comments_week").notNull(),
   createdAt: createdAt(),
 });
 

@@ -102,6 +102,8 @@ test("オーナーも 2 段階認証を設定するまで管理画面に入れ�
   await expect(p).toHaveURL("/");
   await p.goto("/admin");
   await expect(p).toHaveURL("/admin");
+  // Phase を進める判断に使う、週次アクティブ率の推移（記録は毎日の定期処理が残す）
+  await expect(p.getByRole("heading", { name: "週次アクティブ率の推移" })).toBeVisible();
   await p.context().close();
 });
 

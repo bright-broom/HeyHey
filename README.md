@@ -133,8 +133,10 @@ Server Actions は外部から直接呼べる HTTP エンドポイントなの�
 
 ```bash
 npm run typecheck
-npm test            # 157 件：公開範囲・入会フロー・通報と処分・権限境界・画像・2 段階認証・運用機能・ブロック・メンション・メール・グループ・レビュー指摘の回帰
-TEST_DATABASE_URL=postgres://... npm run test:pg   # 同じテストを実際の PostgreSQL で（本番と同じドライバ）
+npm test            # 173 件：公開範囲・入会フロー・通報と処分・権限境界・画像・2 段階認証・運用機能・ブロック・メンション・メール・グループ・利用状況の記録・レビュー指摘の回帰
+# 同じテストを実際の PostgreSQL で（本番と同じドライバ）。空の DB に先にマイグレーションを当てる
+DATABASE_URL=postgres://... PGLITE_DIR= npm run db:migrate
+TEST_DATABASE_URL=postgres://... npm run test:pg
 npm run build && npm run test:e2e   # 10 件：本番ビルドをブラウザで操作（招待→2 段階認証→承認→投稿→グループ→パスワード再設定→停止）
 npm run verify      # 上記すべて
 ```

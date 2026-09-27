@@ -17,6 +17,7 @@ import { AppError, conflict, forbidden, invalid, notFound } from "../lib/errors"
 import { verifyPassword } from "../lib/password";
 import { assertAdmin, assertOwner } from "../lib/policy";
 import type { Viewer } from "../lib/viewer";
+import { activityCounts } from "./activity";
 import { audit } from "./audit";
 import { deleteUserSessions } from "./auth";
 import { checkSecondFactor, mfaEnabled } from "./mfa";
@@ -352,12 +353,9 @@ export async function dashboard(db: Db, viewer: Viewer) {
   const count = async (q: Promise<{ n: number }[]>) => (await q)[0]?.n ?? 0;
   const n = sql<number>`count(*)::int`;
 
-  const [pending, activeMembers, weeklyActive, postsWeek, commentsWeek, openReports, reviewAvg, oldestPending] = await Promise.all([
+  const [pending, activity, openReports, reviewAvg, oldestPending] = await Promise.all([
     count(db.select({ n }).from(users).where(eq(users.status, "pending"))),
-    count(db.select({ n }).from(users).where(eq(users.status, "active"))),
-    count(db.select({ n }).from(users).where(and(eq(users.status, "active"), gt(users.lastSeenAt, weekAgo)))),
-    count(db.select({ n }).from(posts).where(and(gt(posts.createdAt, weekAgo), isNull(posts.deletedAt)))),
-    count(db.select({ n }).from(comments).where(and(gt(comments.createdAt, weekAgo), isNull(comments.deletedAt)))),
+    activityCounts(db),
     count(db.select({ n }).from(reports).where(eq(reports.status, "open"))),
     db
       .select({ hours: sql<number | null>`avg(extract(epoch from (${applications.decidedAt} - ${applications.createdAt})) / 3600)::float` })
@@ -379,10 +377,10 @@ export async function dashboard(db: Db, viewer: Viewer) {
     pendingApplications: pending,
     oldestPendingAt: oldestPending[0]?.createdAt ?? null,
     avgReviewHours: reviewAvg[0]?.hours ?? null,
-    activeMembers,
-    weeklyActiveMembers: weeklyActive,
-    postsThisWeek: postsWeek,
-    commentsThisWeek: commentsWeek,
+    activeMembers: activity.activeMembers,
+    weeklyActiveMembers: activity.weeklyActiveMembers,
+    postsThisWeek: activity.postsWeek,
+    commentsThisWeek: activity.commentsWeek,
     openReports,
     invitesThisWeek: inv?.n ?? 0,
   };

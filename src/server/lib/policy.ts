@@ -60,6 +60,8 @@ export const AUTO_HIDE_REPORT_THRESHOLD = 3;
 export const REAPPLY_COOLDOWN_DAYS = 30;
 /** 招待リンクの既定の有効期限 */
 export const INVITE_TTL_DAYS = 7;
+/** Phase 3 に進む条件：週次アクティブ率（直近 7 日にアクセスした会員 ÷ 会員数）がこの割合以上 */
+export const PHASE3_WEEKLY_ACTIVE_RATE = 0.4;
 /** 審査の目標時間（超過を管理画面で強調） */
 export const REVIEW_SLA_HOURS = 72;
 /** 削除した投稿・退会者の情報を完全に消去するまでの日数（プライバシーポリシーに明記） */

@@ -15,6 +15,7 @@ import {
   users,
 } from "../db/schema";
 import { PURGE_AFTER_DAYS, REVIEW_SLA_HOURS } from "../lib/policy";
+import { recordActivitySnapshot } from "./activity";
 import { audit } from "./audit";
 import { budget, dispatchPendingNotificationEmails, isDigestDay, sendWeeklyDigests } from "./email-notify";
 import { notifyAdmins } from "./notifications";
@@ -27,6 +28,8 @@ import { removeStoredFile } from "./storage";
 const DAY = 24 * 60 * 60 * 1000;
 
 export type MaintenanceReport = {
+  /** その日の利用状況を記録したか（同じ日の 2 回目以降は false） */
+  activityRecorded: boolean;
   purgedPosts: number;
   erasedComments: number;
   purgedFiles: number;
@@ -39,6 +42,9 @@ export type MaintenanceReport = {
 
 export async function runDailyMaintenance(db: Db, now = new Date()): Promise<MaintenanceReport> {
   const cutoff = new Date(now.getTime() - PURGE_AFTER_DAYS * DAY);
+
+  // 0) 利用状況を 1 日 1 行残す（片付けで数字が変わる前に。人数だけで、誰がかは残さない）
+  const activityRecorded = await recordActivitySnapshot(db, now);
 
   // 未処理の通報がかかっているものは、対応が終わるまで消さない（本人が消しても証拠を残す）
   const postUnderReview = sql`EXISTS (SELECT 1 FROM ${reports} WHERE ${reports.status} = 'open' AND (
@@ -127,6 +133,7 @@ export async function runDailyMaintenance(db: Db, now = new Date()): Promise<Mai
   }
 
   const report: MaintenanceReport = {
+    activityRecorded,
     purgedPosts: purgedPosts.length,
     erasedComments: erasedComments.length,
     purgedFiles: doomedFiles.length,
