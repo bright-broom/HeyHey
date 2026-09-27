@@ -17,7 +17,7 @@ import { stillVisible, type NotificationType } from "./notifications";
  * - すぐのお知らせ：メンション・コメント・返信・友達申請。同じ人には 15 分に 1 通まで、まとめて送る
  * - 週 1 回のまとめ：月曜（日本時間）の定期処理で、新しい投稿の数と未読の数を送る
  */
-export const EMAIL_NOTIFICATION_TYPES: NotificationType[] = ["mention", "comment", "reply", "friend_request"];
+export const EMAIL_NOTIFICATION_TYPES: NotificationType[] = ["mention", "comment", "reply", "friend_request", "message"];
 const THROTTLE_MIN = 15;
 /** これより古い未送信のお知らせは、メールにしない（機能を入れた直後に過去の分がまとめて届かないように） */
 const LOOKBACK_HOURS = 24;

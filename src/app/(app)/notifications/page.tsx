@@ -30,6 +30,8 @@ function describe(n: N): { text: string; href?: string } {
       return { text: `あなたの通報が処理されました（${d.resolution}）` };
     case "moderation":
       return { text: `あなたの${d.targetType === "comment" ? "コメント" : "投稿"}に対して管理者が対応しました（${d.resolution}）${d.note ? `：${d.note}` : ""}` };
+    case "message":
+      return { text: `${who} さんからメッセージが届きました`, href: `/messages/${n.actorId}` };
     case "mention":
       return { text: `${who} さんがあなたをメンションしました`, href: `/posts/${n.postId}` };
     case "group_join_request":

@@ -506,6 +506,54 @@ export const mailOutbox = pgTable("mail_outbox", {
   createdAt: createdAt(),
 });
 
+// ───────── 1 対 1 メッセージ（F-16） ─────────
+
+/**
+ * 2 人のやりとり。同じ 2 人の組は 1 つだけ（userA < userB の順に並べて持つ）。
+ * 本文は当事者の 2 人にしか見せない（管理者にも見せない。困ったときは相手を会員として通報する）。
+ */
+export const conversations = pgTable(
+  "conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userA: uuid("user_a")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    userB: uuid("user_b")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** それぞれが最後に読んだ日時（未読の数え方に使う） */
+    readAtA: ts("read_at_a"),
+    readAtB: ts("read_at_b"),
+    lastMessageAt: ts("last_message_at").notNull().defaultNow(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("conversations_pair_key").on(t.userA, t.userB),
+    index("conversations_a_idx").on(t.userA, t.lastMessageAt),
+    index("conversations_b_idx").on(t.userB, t.lastMessageAt),
+    check("conversations_ordered", sql`${t.userA} < ${t.userB}`),
+  ],
+);
+
+export const messages = pgTable(
+  "messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    senderId: uuid("sender_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    body: text("body").notNull(),
+    /** 送った人が消した。本文はその時点で空にする */
+    deletedAt: ts("deleted_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("messages_conversation_idx").on(t.conversationId, t.createdAt)],
+);
+
 /**
  * 利用状況の日ごとの記録（毎日の定期処理で 1 行）。人数だけを持ち、誰がかは持たない。
  * 最終アクセス日時は上書きされるので、週次アクティブ率の推移はここにしか残らない（Phase を進める判断に使う）。

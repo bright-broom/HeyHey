@@ -1,7 +1,7 @@
 import { and, asc, eq, ilike, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "../db/client";
-import { applications, comments, friendships, groupMembers, invitations, media, posts, profiles, sessions, users } from "../db/schema";
+import { applications, comments, friendships, groupMembers, invitations, media, messages, posts, profiles, sessions, users } from "../db/schema";
 import { forbidden, invalid } from "../lib/errors";
 import { verifyPassword } from "../lib/password";
 import { assertMember } from "../lib/policy";
@@ -142,6 +142,8 @@ export async function withdraw(db: Db, viewer: Viewer, input: { password: string
     if (input.mode === "delete") {
       await tx.update(posts).set({ deletedAt: now }).where(eq(posts.authorId, viewer.id));
       await tx.update(comments).set({ deletedAt: now }).where(eq(comments.authorId, viewer.id));
+      // メッセージは本文ごと消す（相手の画面には「削除されたメッセージ」と出る）
+      await tx.update(messages).set({ deletedAt: now, body: "" }).where(eq(messages.senderId, viewer.id));
       const postImages = await tx
         .delete(media)
         .where(and(eq(media.ownerId, viewer.id), eq(media.kind, "post")))

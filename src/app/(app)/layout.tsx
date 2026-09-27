@@ -7,6 +7,7 @@ import { NavLinks } from "@/components/NavLinks";
 import { getDb } from "@/server/db/client";
 import { profiles } from "@/server/db/schema";
 import { hasAdminRole } from "@/server/lib/policy";
+import { unreadMessageCount } from "@/server/services/messages";
 import { unreadCount } from "@/server/services/notifications";
 import { readFlash } from "@/server/web/flash";
 import { requireMember } from "@/server/web/session";
@@ -15,8 +16,9 @@ import { requireMember } from "@/server/web/session";
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const viewer = await requireMember();
   const db = await getDb();
-  const [unread, [profile]] = await Promise.all([
+  const [unread, unreadMessages, [profile]] = await Promise.all([
     unreadCount(db, viewer),
+    unreadMessageCount(db, viewer),
     db.select({ avatarMediaId: profiles.avatarMediaId }).from(profiles).where(eq(profiles.userId, viewer.id)),
   ]);
   const nav = [
@@ -24,7 +26,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/members", label: "メンバー" },
     { href: "/friends", label: "友達" },
     { href: "/groups", label: "グループ" },
+    { href: "/events", label: "イベント" },
+    { href: "/messages", label: "メッセージ", badge: unreadMessages },
     { href: "/notifications", label: "通知", badge: unread },
+    { href: "/search", label: "検索" },
     { href: "/invites", label: "招待" },
   ];
   return (

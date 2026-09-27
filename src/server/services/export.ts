@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Db } from "../db/client";
-import { applications, comments, friendships, invitations, media, posts, profiles, reactions, reports, userMfa, users } from "../db/schema";
+import { applications, comments, conversations, friendships, invitations, media, messages, posts, profiles, reactions, reports, userMfa, users } from "../db/schema";
 import { AppError } from "../lib/errors";
 import { assertMember } from "../lib/policy";
 import { blockedBetween } from "../lib/visibility";
@@ -84,7 +84,7 @@ export async function exportMyData(db: Db, viewer: Viewer) {
       .where(eq(invitations.createdById, id))
       .orderBy(asc(invitations.createdAt)),
     db
-      .select({ id: media.id, kind: media.kind, postId: media.postId, mime: media.mime, width: media.width, height: media.height, createdAt: media.createdAt })
+      .select({ id: media.id, kind: media.kind, postId: media.postId, mime: media.mime, fileName: media.fileName, width: media.width, height: media.height, createdAt: media.createdAt })
       .from(media)
       .where(eq(media.ownerId, id)),
     db
@@ -92,6 +92,14 @@ export async function exportMyData(db: Db, viewer: Viewer) {
       .from(reports)
       .where(eq(reports.reporterId, id)),
   ]);
+
+  // メッセージは自分が送ったものだけ（相手の本文は相手の個人情報なので出さない）
+  const myMessages = await db
+    .select({ to: sql<string>`CASE WHEN ${conversations.userA} = ${id} THEN ${conversations.userB} ELSE ${conversations.userA} END`, body: messages.body, createdAt: messages.createdAt, deletedAt: messages.deletedAt })
+    .from(messages)
+    .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+    .where(eq(messages.senderId, id))
+    .orderBy(asc(messages.createdAt));
 
   await audit(db, { actorId: id, action: "user.export", targetType: "user", targetId: id });
   return {
@@ -113,6 +121,7 @@ export async function exportMyData(db: Db, viewer: Viewer) {
     })),
     invitations: myInvitations,
     media: myMedia.map((m) => ({ ...m, url: `/api/media/${m.id}` })),
+    messagesSent: myMessages,
     reportsFiled: myReports,
   };
 }

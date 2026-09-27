@@ -83,7 +83,12 @@ export default async function ProfilePage(props: PageProps<"/u/[id]">) {
               <RelationButton userId={profile.id} op="unblock" label="ブロックを解除する" className="btn-ghost" />
             </div>
           ) : (
-            <FriendButton userId={profile.id} rel={profile.relationship} />
+            <div className="flex flex-wrap gap-3">
+              <FriendButton userId={profile.id} rel={profile.relationship} />
+              <Link href={`/messages/${profile.id}`} className="btn-ghost">
+                メッセージ
+              </Link>
+            </div>
           )}
         </div>
         {profile.relationship !== "self" && !profile.blocking && (

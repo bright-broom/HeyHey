@@ -19,7 +19,8 @@ export type NotificationType =
   | "report_submitted"
   | "ownership_transferred"
   | "group_join_request"
-  | "group_join_approved";
+  | "group_join_approved"
+  | "message";
 
 /** 運営の通知（審査・通報）。管理者個人のブロック・ミュートでは止めない */
 export const OPS_NOTIFICATION_TYPES: NotificationType[] = ["application_submitted", "application_overdue", "report_submitted", "ownership_transferred", "moderation", "report_resolved"];
