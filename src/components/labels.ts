@@ -6,7 +6,7 @@ export const STATUS_LABEL: Record<string, string> = {
   rejected: "却下",
   withdrawn: "退会",
 };
-export const ROLE_LABEL: Record<string, string> = { member: "一般", admin: "管理者", owner: "オーナー" };
+export const ROLE_LABEL: Record<string, string> = { member: "会員", admin: "管理者", owner: "管理者" };
 export const STATUS_BADGE: Record<string, string> = {
   unverified: "text-muted",
   pending: "text-warn",

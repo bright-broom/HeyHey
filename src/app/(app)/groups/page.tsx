@@ -10,7 +10,7 @@ export const metadata = { title: "グループ" };
 type G = Awaited<ReturnType<typeof listGroups>>[number];
 
 function GroupRow({ g }: { g: G }) {
-  const status = g.me?.status === "active" ? (g.me.role === "owner" ? "管理人" : "参加中") : g.me?.status === "pending" ? "承認待ち" : null;
+  const status = g.me?.status === "active" ? (g.me.role === "owner" ? "代表" : "参加中") : g.me?.status === "pending" ? "承認待ち" : null;
   return (
     <li className="flex flex-wrap items-baseline gap-x-6 gap-y-2 py-5">
       <div className="min-w-0 flex-1">

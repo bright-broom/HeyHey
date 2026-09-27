@@ -128,16 +128,24 @@ export async function searchMembers(db: Db, viewer: Viewer, qRaw = "") {
  */
 export async function withdraw(db: Db, viewer: Viewer, input: { password: string; mode: "delete" | "anonymize" }) {
   assertMember(viewer);
-  if (viewer.role === "owner") throw forbidden("オーナーは退会できません。先に別の会員へオーナー権限を移してください。");
+  // 最後の管理者は退会できない（管理者が 1 人もいなくなるため）
+  if (viewer.role === "admin" || viewer.role === "owner") {
+    const [other] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.status, "active"), sql`${users.role} IN ('admin', 'owner')`, sql`${users.id} <> ${viewer.id}`))
+      .limit(1);
+    if (!other) throw forbidden("最後の管理者は退会できません。先にほかの会員を管理者に任命してください。");
+  }
   if (input.mode !== "delete" && input.mode !== "anonymize") throw invalid("投稿の扱いを選んでください。");
   const [me] = await db.select().from(users).where(eq(users.id, viewer.id));
   if (!me || !(await verifyPassword(input.password, me.passwordHash))) throw invalid("パスワードが正しくありません。");
 
   const filesToRemove: string[] = [];
   await db.transaction(async (tx) => {
-    // グループのオーナーなら、先に移してもらう（閉じたグループも。確認はこのトランザクションの中で）
+    // グループの代表なら、先に移してもらう（閉じたグループも。確認はこのトランザクションの中で）
     const owned = await ownedGroups(tx, viewer.id);
-    if (owned.length) throw invalid(`グループ「${owned.join("」「")}」の管理人です。先にほかのメンバーへ管理人を移してください（閉じたグループは、再開してから移せます）。`);
+    if (owned.length) throw invalid(`グループ「${owned.join("」「")}」の代表です。先にほかのメンバーへ代表を移してください（閉じたグループは、再開してから移せます）。`);
     const now = new Date();
     if (input.mode === "delete") {
       await tx.update(posts).set({ deletedAt: now }).where(eq(posts.authorId, viewer.id));

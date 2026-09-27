@@ -11,21 +11,23 @@ export function isMember(v: Viewer | null | undefined): v is Viewer {
   return !!v && v.status === "active" && v.termsAccepted;
 }
 
-/** 役割として管理者以上か（2 段階認証の有無は問わない）。画面の案内と「処分できない相手」の判定用 */
+/**
+ * 役割は「管理者」と「会員」の 2 つだけ。管理者どうしは対等（任命・解任・処分はすべての管理者に知らせ、監査ログに残す）。
+ * owner は以前の役割の名残り（マイグレーションで admin にした）。念のため管理者として扱う。
+ */
+export const isAdminRole = (role: string) => role === "admin" || role === "owner";
+
+/** 役割として管理者か（2 段階認証の有無は問わない）。画面の案内用 */
 export function hasAdminRole(v: Viewer | null | undefined): boolean {
-  return isMember(v) && (v.role === "admin" || v.role === "owner");
+  return isMember(v) && isAdminRole(v.role);
 }
 
 /**
- * 管理権限を行使できるか。管理者以上でも、2 段階認証を有効にするまでは権限が働かない（F-04）。
+ * 管理権限を行使できるか。管理者でも、2 段階認証を有効にするまでは権限が働かない（F-04）。
  * パスワードだけ漏れた管理者アカウントで、会員の情報や審査を触らせないため。
  */
 export function isAdmin(v: Viewer | null | undefined): v is Viewer {
   return isMember(v) && hasAdminRole(v) && v.mfa;
-}
-
-export function isOwner(v: Viewer | null | undefined): v is Viewer {
-  return isAdmin(v) && v.role === "owner";
 }
 
 export const MFA_REQUIRED_MESSAGE = "管理機能を使うには、先に 2 段階認証を設定してください。";
@@ -39,12 +41,6 @@ export function assertAdmin(v: Viewer | null | undefined): asserts v is Viewer {
   assertMember(v);
   if (hasAdminRole(v) && !v.mfa) throw forbidden(MFA_REQUIRED_MESSAGE);
   if (!isAdmin(v)) throw forbidden("管理者のみが行える操作です。");
-}
-
-export function assertOwner(v: Viewer | null | undefined): asserts v is Viewer {
-  assertMember(v);
-  if (v.role === "owner" && !v.mfa) throw forbidden(MFA_REQUIRED_MESSAGE);
-  if (!isOwner(v)) throw forbidden("オーナーのみが行える操作です。");
 }
 
 /** 会員 1 人あたりの月間招待枠。管理権限を行使できる人は無制限 */

@@ -247,7 +247,7 @@ export const groupMembers = pgTable(
   (t) => [
     primaryKey({ columns: [t.groupId, t.userId] }),
     index("group_members_user_idx").on(t.userId),
-    // オーナーは 1 グループに 1 人（移譲・管理者の指定が同時に起きても、DB が 2 人目を拒む）
+    // 代表（owner）は 1 グループに 1 人（移譲・管理者の指定が同時に起きても、DB が 2 人目を拒む）
     uniqueIndex("group_members_one_owner_key").on(t.groupId).where(sql`${t.role} = 'owner'`),
   ],
 );

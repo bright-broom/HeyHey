@@ -3,11 +3,11 @@ import type { Db } from "../db/client";
 import { auditLogs, userMfa, users } from "../db/schema";
 import { isHttps } from "../lib/env";
 import { operatorInfo } from "../lib/operator";
-import { assertOwner } from "../lib/policy";
+import { assertAdmin } from "../lib/policy";
 import type { Viewer } from "../lib/viewer";
 
 /**
- * リリース前チェック（オーナー専用）。本番を実際のメンバーに開く前に、運用に必要な設定が
+ * リリース前チェック（管理者向け）。本番を実際のメンバーに開く前に、運用に必要な設定が
  * そろっているかを 1 画面で確かめる。秘密の値そのものは出さず、設定の有無だけを見る。
  */
 export type ReadinessCheck = { id: string; label: string; ok: boolean; detail: string; fix: string };
@@ -15,7 +15,7 @@ export type ReadinessCheck = { id: string; label: string; ok: boolean; detail: s
 const DAY = 24 * 60 * 60 * 1000;
 
 export async function releaseChecks(db: Db, viewer: Viewer, now = new Date()): Promise<ReadinessCheck[]> {
-  assertOwner(viewer);
+  assertAdmin(viewer);
   const env = process.env;
   const op = operatorInfo();
 
@@ -64,7 +64,7 @@ export async function releaseChecks(db: Db, viewer: Viewer, now = new Date()): P
       id: "admins",
       label: "2 段階認証を済ませた管理者が 2 人以上",
       ok: admins.length >= 2,
-      detail: `いま ${admins.length} 人です（オーナーを含む）。1 人に権限が集中しないようにします。`,
+      detail: `いま ${admins.length} 人です。1 人に権限が集中しないようにします。`,
       fix: "会員に 2 段階認証を設定してもらい、会員管理から管理者に任命し、設定チケットを渡す。",
     },
     {

@@ -40,9 +40,9 @@ async function demoUser(email: string, o: Parameters<typeof makeUser>[1] = {}) {
 describe("デモアカウントの台帳", () => {
   it("メールアドレスは重複せず、すべての区分に 1 人以上いる。権限と状態の組み合わせを網羅する", () => {
     expect(new Set(DEMO_ACCOUNTS.map((a) => a.email)).size).toBe(DEMO_ACCOUNTS.length);
-    for (const g of ["owner", "admin", "member", "applicant", "blocked"]) expect(DEMO_ACCOUNTS.some((a) => a.group === g)).toBe(true);
+    for (const g of ["admin", "member", "applicant", "blocked"]) expect(DEMO_ACCOUNTS.some((a) => a.group === g)).toBe(true);
     const combos = new Set(DEMO_ACCOUNTS.map((a) => `${a.role}:${a.status}:${!!a.mfa}:${!!a.termsPending}`));
-    for (const c of ["owner:active:true:false", "admin:active:true:false", "admin:active:false:false", "member:active:false:false", "member:active:true:false", "member:active:false:true", "member:pending:false:false", "member:unverified:false:false", "member:suspended:false:false", "member:rejected:false:false"]) {
+    for (const c of ["admin:active:true:false", "admin:active:false:false", "member:active:false:false", "member:active:true:false", "member:active:false:true", "member:pending:false:false", "member:unverified:false:false", "member:suspended:false:false", "member:rejected:false:false"]) {
       expect(combos).toContain(c);
     }
   });
@@ -76,7 +76,7 @@ describe("デモログイン", () => {
   });
 
   it("台帳にないアカウントには使えない（実在する会員でも）", async () => {
-    const real = await makeUser(d, { role: "owner" });
+    const real = await makeUser(d, { role: "admin" });
     await expect(demoLogin(d, real.user.email)).rejects.toMatchObject({ code: "not_found" });
     await expect(demoLogin(d, "nobody@example.org")).rejects.toMatchObject({ code: "not_found" });
   });

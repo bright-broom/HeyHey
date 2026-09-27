@@ -28,7 +28,7 @@ export function GroupForm({ group }: Props) {
           <input type="radio" name="joinPolicy" value="approval" defaultChecked={(group?.joinPolicy ?? "approval") === "approval"} className="mt-1" />
           <span>
             承認制
-            <span className="hint mt-0.5 block">参加するには、管理人の承認が必要です。</span>
+            <span className="hint mt-0.5 block">参加するには、代表の承認が必要です。</span>
           </span>
         </label>
         <label className="flex items-start gap-3 text-sm">

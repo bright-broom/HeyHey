@@ -2,7 +2,7 @@ import { PageTitle } from "@/components/PageTitle";
 import Link from "next/link";
 import { formatDateTime } from "@/components/time";
 import { getDb } from "@/server/db/client";
-import { isOwner, PHASE3_WEEKLY_ACTIVE_RATE, REVIEW_SLA_HOURS } from "@/server/lib/policy";
+import { PHASE3_WEEKLY_ACTIVE_RATE, REVIEW_SLA_HOURS } from "@/server/lib/policy";
 import { weeklyActivityTrend, type WeeklyActivity } from "@/server/services/activity";
 import { dashboard } from "@/server/services/admin";
 import { releaseChecks } from "@/server/services/readiness";
@@ -25,7 +25,7 @@ function Stat({ label, value, sub, href, alert }: { label: string; value: string
 export default async function AdminHome() {
   const viewer = await requireAdmin();
   const db = await getDb();
-  const [s, trend, checks] = await Promise.all([dashboard(db, viewer), weeklyActivityTrend(db, viewer), isOwner(viewer) ? releaseChecks(db, viewer) : null]);
+  const [s, trend, checks] = await Promise.all([dashboard(db, viewer), weeklyActivityTrend(db, viewer), releaseChecks(db, viewer)]);
   const oldestHours = s.oldestPendingAt ? (Date.now() - s.oldestPendingAt.getTime()) / 3600_000 : 0;
   const overdue = oldestHours > REVIEW_SLA_HOURS;
   return (
@@ -114,14 +114,14 @@ function ActivityTrend({ trend }: { trend: WeeklyActivity[] }) {
   );
 }
 
-/** オーナーだけに見せる、本番を開く前の設定確認 */
+/** 本番を開く前の設定確認 */
 function ReleaseChecks({ checks }: { checks: Awaited<ReturnType<typeof releaseChecks>> }) {
   const done = checks.filter((c) => c.ok).length;
   return (
     <section aria-labelledby="readiness-title" className="mt-20">
       <div className="flex flex-wrap items-end justify-between gap-4 border-b border-line pb-4">
         <div>
-          <p className="plaque">RELEASE CHECK · OWNER ONLY</p>
+          <p className="plaque">RELEASE CHECK</p>
           <h2 id="readiness-title" className="h2 mt-2">リリース前チェック</h2>
         </div>
         <p className="text-sm tabular-nums text-muted">

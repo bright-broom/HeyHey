@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, ilike, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
-import type { Db } from "../db/client";
+import type { Db, DbOrTx } from "../db/client";
 import {
   applications,
   auditLogs,
@@ -14,15 +14,12 @@ import {
   users,
 } from "../db/schema";
 import { AppError, conflict, forbidden, invalid, notFound } from "../lib/errors";
-import { verifyPassword } from "../lib/password";
-import { assertAdmin, assertOwner } from "../lib/policy";
+import { assertAdmin, isAdminRole } from "../lib/policy";
 import type { Viewer } from "../lib/viewer";
 import { activityCounts } from "./activity";
 import { audit } from "./audit";
 import { deleteUserSessions } from "./auth";
-import { checkSecondFactor, mfaEnabled } from "./mfa";
-import { notify } from "./notifications";
-import { consume } from "./ratelimit";
+import { notify, notifyAdmins } from "./notifications";
 import { appUrl, sendMail } from "./mailer";
 
 // ───────── 入会審査 ─────────
@@ -218,11 +215,26 @@ async function loadTarget(db: Db, userId: string) {
   return u;
 }
 
-/** 管理者はオーナーを、自分自身を処分できない。オーナーは管理者を処分できる */
+/** 自分自身は処分できない（管理者どうしは対等なので、ほかの管理者は処分できる） */
 export function assertCanModerate(viewer: Viewer, target: { id: string; role: string }) {
   if (target.id === viewer.id) throw forbidden("自分自身は対象にできません。");
-  if (target.role === "owner") throw forbidden("オーナーは対象にできません。");
-  if (target.role === "admin" && viewer.role !== "owner") throw forbidden("管理者を処分できるのはオーナーのみです。");
+}
+
+/**
+ * 管理者に関わる変更（任命・解任・管理者の停止）を 1 つずつ順に行い、終わった後も
+ * 動ける管理者が 1 人以上いることを確かめる（同時に停止し合って 0 人になるのを防ぐ）。
+ * 変更はすべての管理者に知らせる（管理者どうしが互いの操作を見られるように）。
+ */
+async function adminChange(tx: DbOrTx, viewer: Viewer, target: { id: string; displayName: string }, change: string) {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(7240001)`);
+  return async () => {
+    const [left] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(users)
+      .where(and(eq(users.status, "active"), inArray(users.role, ["admin", "owner"])));
+    if (!left || left.n < 1) throw conflict("管理者が 1 人もいなくなるため、この操作はできません。");
+    await notifyAdmins(tx, { type: "admin_changed", actorId: viewer.id, data: { name: target.displayName, change } });
+  };
 }
 
 export async function suspendUser(db: Db, viewer: Viewer, userId: string, reasonRaw: string) {
@@ -233,12 +245,14 @@ export async function suspendUser(db: Db, viewer: Viewer, userId: string, reason
   assertCanModerate(viewer, target);
   if (target.status !== "active") throw conflict("会員（承認済み）の状態でのみ停止できます。");
   await db.transaction(async (tx) => {
+    const done = isAdminRole(target.role) ? await adminChange(tx, viewer, target, "停止") : null;
     await tx
       .update(users)
       .set({ status: "suspended", suspendedAt: new Date(), suspendedReason: reason.slice(0, 500), updatedAt: new Date() })
       .where(eq(users.id, userId));
     await deleteUserSessions(tx, userId);
     await audit(tx, { actorId: viewer.id, action: "user.suspend", targetType: "user", targetId: userId, reason });
+    await done?.();
   });
 }
 
@@ -253,14 +267,17 @@ export async function reinstateUser(db: Db, viewer: Viewer, userId: string) {
   });
 }
 
+/** 管理者の任命・解任（どの管理者も行える。自分自身は変えられない） */
 export async function setRole(db: Db, viewer: Viewer, userId: string, role: "member" | "admin") {
-  assertOwner(viewer);
+  assertAdmin(viewer);
   if (role !== "member" && role !== "admin") throw invalid("権限の指定が正しくありません。");
   const target = await loadTarget(db, userId);
-  if (target.id === viewer.id || target.role === "owner") throw forbidden("オーナーの権限は変更できません。");
+  if (target.id === viewer.id) throw forbidden("自分自身の権限は変更できません。");
   if (target.status !== "active") throw conflict("承認済みの会員のみ権限を変更できます。");
-  const promoted = role === "admin" && target.role !== "admin";
+  if (isAdminRole(target.role) === (role === "admin")) return;
+  const promoted = role === "admin";
   await db.transaction(async (tx) => {
+    const done = await adminChange(tx, viewer, target, promoted ? "管理者に任命" : "管理者を解任");
     await tx.update(users).set({ role, updatedAt: new Date() }).where(eq(users.id, userId));
     if (promoted) {
       // 会員のうちに設定された 2 段階認証は、パスワードだけで設定できたもの（誰が設定したか保証がない）。
@@ -271,46 +288,7 @@ export async function setRole(db: Db, viewer: Viewer, userId: string, role: "mem
       await deleteUserSessions(tx, userId);
     }
     await audit(tx, { actorId: viewer.id, action: "user.set_role", targetType: "user", targetId: userId, meta: { from: target.role, to: role } });
-  });
-}
-
-/**
- * オーナー権限の移譲。相手は承認済みで 2 段階認証を設定済みの管理者に限り、
- * 移す側はパスワードと認証アプリのコードで本人確認する（最も強い権限なので、セッションだけでは動かさない）。
- * 移した後、元のオーナーは管理者になる。オーナーが 2 人にならないよう、
- * 「自分がまだオーナーであること」を条件に先に降格してから、相手を昇格する。
- */
-export async function transferOwnership(db: Db, viewer: Viewer, userId: string, input: { password: string; code: string }) {
-  assertOwner(viewer);
-  const target = await loadTarget(db, userId);
-  if (target.id === viewer.id) throw invalid("自分自身には移せません。");
-  if (target.role !== "admin" || target.status !== "active" || !target.termsAcceptedAt) {
-    throw conflict("オーナー権限を移せるのは、承認済みの管理者だけです。先に管理者に任命してください。");
-  }
-  if (!(await mfaEnabled(db, target.id))) throw conflict("移す相手が 2 段階認証を設定していません。先に設定してもらってください。");
-  if (!(await consume(db, `owner:transfer:${viewer.id}`, 5, 15 * 60))) {
-    throw new AppError("rate_limited", "試行回数が上限に達しました。15 分ほど待ってから再度お試しください。");
-  }
-  const [me] = await db.select({ passwordHash: users.passwordHash }).from(users).where(eq(users.id, viewer.id));
-  if (!me || !(await verifyPassword(input.password, me.passwordHash))) throw invalid("パスワードが正しくありません。");
-  await db.transaction(async (tx) => {
-    if ((await checkSecondFactor(tx, viewer.id, input.code)) !== "totp") throw invalid("確認コードが正しくありません。");
-    // 確認の後に相手の 2 段階認証が解除されていた場合も通さない
-    if (!(await mfaEnabled(tx, target.id))) throw conflict("移す相手が 2 段階認証を設定していません。");
-    const [demoted] = await tx
-      .update(users)
-      .set({ role: "admin", updatedAt: new Date() })
-      .where(and(eq(users.id, viewer.id), eq(users.role, "owner")))
-      .returning({ id: users.id });
-    if (!demoted) throw conflict("すでにオーナーではありません。");
-    const [promoted] = await tx
-      .update(users)
-      .set({ role: "owner", updatedAt: new Date() })
-      .where(and(eq(users.id, target.id), eq(users.role, "admin"), eq(users.status, "active")))
-      .returning({ id: users.id });
-    if (!promoted) throw conflict("相手の状態が変わったため、移せませんでした。");
-    await audit(tx, { actorId: viewer.id, action: "user.transfer_ownership", targetType: "user", targetId: target.id, meta: { from: viewer.id, to: target.id } });
-    await notify(tx, { userId: target.id, type: "ownership_transferred", actorId: viewer.id, data: { name: viewer.displayName } });
+    await done();
   });
 }
 
@@ -318,7 +296,7 @@ export async function setInviteQuota(db: Db, viewer: Viewer, userId: string, quo
   assertAdmin(viewer);
   if (quota !== null && (!Number.isInteger(quota) || quota < 0 || quota > 100)) throw invalid("招待枠は 0〜100 の整数で指定してください。");
   const target = await loadTarget(db, userId);
-  if (target.role !== "member") throw invalid("招待枠は一般会員にだけ設定できます（管理者以上は無制限）。");
+  if (target.role !== "member") throw invalid("招待枠は会員にだけ設定できます（管理者は無制限）。");
   await db.transaction(async (tx) => {
     await tx.update(users).set({ inviteQuotaOverride: quota, updatedAt: new Date() }).where(eq(users.id, userId));
     await audit(tx, { actorId: viewer.id, action: "user.set_invite_quota", targetType: "user", targetId: userId, meta: { quota } });

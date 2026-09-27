@@ -3,7 +3,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import type { Db } from "@/server/db/client";
 import { applications, auditLogs, comments, mailOutbox, notifications, posts, reports, sessions, users } from "@/server/db/schema";
 import { totpCode, totpStep } from "@/server/lib/totp";
-import { transferOwnership } from "@/server/services/admin";
+import { setRole } from "@/server/services/admin";
 import { createSession, login, requestPasswordReset, resetPassword, userFromSession } from "@/server/services/auth";
 import { exportMyData } from "@/server/services/export";
 import { runDailyMaintenance } from "@/server/services/maintenance";
@@ -71,33 +71,21 @@ describe("パスワードの再設定", () => {
   });
 });
 
-describe("オーナー権限の移譲", () => {
-  const code = (secret: string, offset = 0) => totpCode(secret, totpStep(Date.now()) + offset);
-
-  it("2 段階認証済みの管理者にだけ、パスワードとコードで移せる。移した後は元のオーナーが管理者になる", async () => {
-    const owner = await makeUser(d, { role: "owner" });
-    const admin = await makeUser(d, { role: "admin" });
-    const noMfa = await makeUser(d, { role: "admin", mfa: false });
-    const member = await makeUser(d, { mfa: true });
-
-    await expect(transferOwnership(d, admin.viewer, owner.user.id, { password: PASSWORD, code: code(admin.totpSecret!) })).rejects.toMatchObject({ code: "forbidden" });
-    await expect(transferOwnership(d, owner.viewer, member.user.id, { password: PASSWORD, code: code(owner.totpSecret!) })).rejects.toMatchObject({ code: "conflict" });
-    await expect(transferOwnership(d, owner.viewer, noMfa.user.id, { password: PASSWORD, code: code(owner.totpSecret!) })).rejects.toMatchObject({ code: "conflict" });
-    await expect(transferOwnership(d, owner.viewer, admin.user.id, { password: "wrong-password", code: code(owner.totpSecret!) })).rejects.toMatchObject({ code: "invalid" });
-    await expect(transferOwnership(d, owner.viewer, admin.user.id, { password: PASSWORD, code: code(owner.totpSecret!, 5) })).rejects.toMatchObject({ code: "invalid" });
-
-    await transferOwnership(d, owner.viewer, admin.user.id, { password: PASSWORD, code: code(owner.totpSecret!) });
-    expect((await refreshViewer(d, owner.user.id)).role).toBe("admin");
-    expect((await refreshViewer(d, admin.user.id)).role).toBe("owner");
-    const [log] = await d.select().from(auditLogs).where(and(eq(auditLogs.action, "user.transfer_ownership"), eq(auditLogs.targetId, admin.user.id)));
+describe("管理者どうしは対等", () => {
+  it("どの管理者も任命・解任できる。変更はほかの管理者全員に知らされ、監査ログに残る。自分自身は変えられない", async () => {
+    const a = await makeUser(d, { role: "admin" });
+    const b = await makeUser(d, { role: "admin" });
+    const m = await makeUser(d);
+    await setRole(d, a.viewer, m.user.id, "admin");
+    expect((await refreshViewer(d, m.user.id)).role).toBe("admin");
+    const toB = await d.select().from(notifications).where(and(eq(notifications.userId, b.user.id), eq(notifications.type, "admin_changed")));
+    expect(toB.at(-1)!.data).toMatchObject({ change: "管理者に任命" });
+    const [log] = await d.select().from(auditLogs).where(and(eq(auditLogs.action, "user.set_role"), eq(auditLogs.targetId, m.user.id)));
     expect(log).toBeDefined();
-    const [n] = await d.select().from(notifications).where(and(eq(notifications.userId, admin.user.id), eq(notifications.type, "ownership_transferred")));
-    expect(n).toBeDefined();
-
-    // 古い Viewer（まだオーナーのつもり）で二重に移そうとしても、オーナーは増えない
-    const another = await makeUser(d, { role: "admin" });
-    await expect(transferOwnership(d, owner.viewer, another.user.id, { password: PASSWORD, code: code(owner.totpSecret!, 1) })).rejects.toMatchObject({ code: "conflict" });
-    expect((await refreshViewer(d, another.user.id)).role).toBe("admin");
+    await setRole(d, b.viewer, m.user.id, "member");
+    expect((await refreshViewer(d, m.user.id)).role).toBe("member");
+    await expect(setRole(d, a.viewer, a.user.id, "member")).rejects.toMatchObject({ code: "forbidden" });
+    await expect(setRole(d, m.viewer, b.user.id, "member")).rejects.toMatchObject({ code: "forbidden" });
   });
 });
 
@@ -217,10 +205,12 @@ describe("データのダウンロード", () => {
 });
 
 describe("リリース前チェック", () => {
-  it("オーナーだけが見られ、設定の有無を正しく判定する（値そのものは出さない）", async () => {
-    const owner = await makeUser(d, { role: "owner" });
+  it("管理者が見られ、設定の有無を正しく判定する（値そのものは出さない）", async () => {
+    const owner = await makeUser(d, { role: "admin" });
     const admin = await makeUser(d, { role: "admin" });
-    await expect(releaseChecks(d, admin.viewer)).rejects.toMatchObject({ code: "forbidden" });
+    const member = await makeUser(d);
+    await expect(releaseChecks(d, member.viewer)).rejects.toMatchObject({ code: "forbidden" });
+    await expect(releaseChecks(d, admin.viewer)).resolves.toBeTruthy();
 
     const keys = ["RESEND_API_KEY", "MAIL_FROM", "OPERATOR_NAME", "CONTACT_EMAIL"] as const;
     const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
@@ -229,7 +219,7 @@ describe("リリース前チェック", () => {
       let checks = await releaseChecks(d, owner.viewer);
       expect(checks.find((c) => c.id === "mail")!.ok).toBe(false);
       expect(checks.find((c) => c.id === "operator")!.ok).toBe(false);
-      expect(checks.find((c) => c.id === "admins")!.ok).toBe(true); // オーナーと管理者の 2 人
+      expect(checks.find((c) => c.id === "admins")!.ok).toBe(true); // 管理者が 2 人以上
 
       Object.assign(process.env, { RESEND_API_KEY: "re_test_secret_value", MAIL_FROM: "Kakomi <no-reply@example.com>", OPERATOR_NAME: "BrightBroom", CONTACT_EMAIL: "hello@example.com" });
       checks = await releaseChecks(d, owner.viewer);

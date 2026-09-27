@@ -30,29 +30,29 @@ describe("ログイン後の遷移先（オープンリダイレクト）", () =
 });
 
 describe("通報処理でも権限の境界を守る", () => {
-  it("管理者は、オーナーや他の管理者の投稿を「非表示」「警告」にできない。オーナーは管理者に対して可能", async () => {
-    const owner = await makeUser(d, { role: "owner" });
+  it("自分の投稿への通報は自分で処分できない（ほかの管理者に任せる）。ほかの管理者の投稿は処分できる", async () => {
     const admin = await makeUser(d, { role: "admin" });
     const admin2 = await makeUser(d, { role: "admin" });
     const reporter = await makeUser(d);
-    const ownerPost = await rawPost(d, owner.user.id);
+    const myPost = await rawPost(d, admin.user.id);
     const adminPost = await rawPost(d, admin2.user.id);
-    await createReport(d, reporter.viewer, { targetType: "post", targetId: ownerPost.id, reason: "spam" });
+    await createReport(d, reporter.viewer, { targetType: "post", targetId: myPost.id, reason: "spam" });
     await createReport(d, reporter.viewer, { targetType: "post", targetId: adminPost.id, reason: "spam" });
-    await expect(resolveCase(d, admin.viewer, { targetType: "post", targetId: ownerPost.id, resolution: "hidden" })).rejects.toMatchObject({ code: "forbidden" });
-    await expect(resolveCase(d, admin.viewer, { targetType: "post", targetId: adminPost.id, resolution: "warned" })).rejects.toMatchObject({ code: "forbidden" });
+    await expect(resolveCase(d, admin.viewer, { targetType: "post", targetId: myPost.id, resolution: "hidden" })).rejects.toMatchObject({ code: "forbidden" });
     // 「問題なし」は誰に対してでも可能
-    await resolveCase(d, admin.viewer, { targetType: "post", targetId: ownerPost.id, resolution: "dismissed" });
-    await resolveCase(d, owner.viewer, { targetType: "post", targetId: adminPost.id, resolution: "hidden" });
+    await resolveCase(d, admin.viewer, { targetType: "post", targetId: myPost.id, resolution: "dismissed" });
+    await resolveCase(d, admin.viewer, { targetType: "post", targetId: adminPost.id, resolution: "warned" });
   });
 });
 
 describe("管理操作の取りこぼし", () => {
-  it("管理者はオーナーの招待リンクを取り消せない", async () => {
-    const owner = await makeUser(d, { role: "owner" });
+  it("他人の招待リンクを取り消せるのは管理者だけ（管理者どうしも可）", async () => {
     const admin = await makeUser(d, { role: "admin" });
-    const { invitation } = await createInvitation(d, owner.viewer, {});
-    await expect(revokeInvitation(d, admin.viewer, invitation.id)).rejects.toMatchObject({ code: "forbidden" });
+    const admin2 = await makeUser(d, { role: "admin" });
+    const member = await makeUser(d);
+    const { invitation } = await createInvitation(d, admin2.viewer, {});
+    await expect(revokeInvitation(d, member.viewer, invitation.id)).rejects.toMatchObject({ code: "forbidden" });
+    await revokeInvitation(d, admin.viewer, invitation.id);
   });
 
   it("招待枠は一般会員にだけ設定できる", async () => {

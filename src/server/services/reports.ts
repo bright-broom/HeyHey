@@ -184,7 +184,7 @@ export async function resolveCase(
     .where(and(eq(reports.targetType, input.targetType), eq(reports.targetId, input.targetId), eq(reports.status, "open")));
   if (!open.length) throw conflict("未処理の通報がありません。");
   const targetUserId = open[0]!.targetUserId;
-  // 「問題なし」以外は投稿者への処分なので、会員停止と同じ権限の境界を守る（管理者はオーナー・他の管理者を処分できない）
+  // 「問題なし」以外は投稿者への処分なので、会員停止と同じ権限の境界を守る（自分自身は処分できない）
   if (resolution !== "dismissed") {
     const [author] = await db.select({ id: users.id, role: users.role }).from(users).where(eq(users.id, targetUserId));
     if (author) assertCanModerate(viewer, author);

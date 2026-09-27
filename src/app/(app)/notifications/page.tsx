@@ -34,6 +34,8 @@ function describe(n: N): { text: string; href?: string } {
       return { text: `${who} さんが、イベント「${d.title ?? ""}」に参加します`, href: `/events/${d.eventId}` };
     case "event_canceled":
       return { text: `イベント「${d.title ?? ""}」は中止になりました`, href: `/events/${d.eventId}` };
+    case "admin_changed":
+      return { text: `${who} さんが「${d.name ?? ""}」さんについて、${d.change ?? "権限の変更"}をしました`, href: "/admin/audit" };
     case "message":
       return { text: `${who} さんからメッセージが届きました`, href: `/messages/${n.actorId}` };
     case "mention":
@@ -49,7 +51,8 @@ function describe(n: N): { text: string; href?: string } {
     case "application_overdue":
       return { text: `入会申請が 72 時間を超えて審査待ちです（${d.name ?? ""}）`, href: "/admin/applications" };
     case "ownership_transferred":
-      return { text: `${d.name ?? ""} さんから、オーナー権限が移されました`, href: "/admin" };
+      // 以前の「オーナー権限の移譲」の通知（いまは役割が管理者と会員の 2 つなので発生しない）
+      return { text: `${d.name ?? ""} さんから、管理を引き継ぎました`, href: "/admin" };
     default:
       return { text: "お知らせがあります" };
   }

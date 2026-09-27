@@ -14,9 +14,9 @@ import { consume } from "./ratelimit";
 
 /**
  * 2 段階認証（F-04）。認証アプリの TOTP を基本にし、端末をなくしたとき用にリカバリーコードを出す。
- * 管理者以上は必須（policy.isAdmin が mfa を見る）、一般会員は任意。
+ * 管理者は必須（policy.isAdmin が mfa を見る）、会員は任意。
  *
- * 管理者以上の設定には、運営者が発行する 1 回限りの「設定チケット」も要る。
+ * 管理者の設定には、運営者が発行する 1 回限りの「設定チケット」も要る。
  * パスワードだけが漏れた未設定の管理者アカウントで、攻撃者が先に 2 段階認証を設定して
  * 管理権限を得る（しかも本人を締め出す）ことを防ぐため。
  */
@@ -96,7 +96,7 @@ function openSetupToken(userId: string, token: string): string | null {
   }
 }
 
-/** 管理者以上が設定するときに要る、1 回限りのチケット（運営者が scripts/mfa-ticket.ts で発行） */
+/** 管理者が設定するときに要る、1 回限りのチケット（運営者が scripts/mfa-ticket.ts で発行） */
 export async function issueEnrollmentTicket(db: Db, userId: string): Promise<{ ticket: string; expiresAt: Date }> {
   const ticket = newToken();
   const expiresAt = new Date(Date.now() + ENROLL_TICKET_TTL_MIN * 60 * 1000);
@@ -106,7 +106,7 @@ export async function issueEnrollmentTicket(db: Db, userId: string): Promise<{ t
 }
 
 /**
- * 設定を完了する。パスワードと認証アプリのコードの両方を確かめ、管理者以上はチケットも消費する。
+ * 設定を完了する。パスワードと認証アプリのコードの両方を確かめ、管理者はチケットも消費する。
  * 有効化したら、この端末以外のセッションはすべて破棄する。
  */
 export async function confirmEnrollment(
@@ -203,7 +203,7 @@ export async function regenerateRecoveryCodes(db: Db, viewer: Viewer, input: { c
   return { recoveryCodes: codes };
 }
 
-/** 無効化。一般会員だけが行える（管理者以上は必須のため外せない） */
+/** 無効化。会員だけが行える（管理者は必須のため外せない） */
 export async function disableMfa(db: Db, viewer: Viewer, input: { password: string; code: string }): Promise<void> {
   assertMember(viewer);
   if (hasAdminRole(viewer)) throw forbidden("管理者は 2 段階認証を無効にできません。");

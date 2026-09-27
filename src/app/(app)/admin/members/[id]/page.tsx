@@ -57,7 +57,7 @@ export default async function AdminMemberPage(props: PageProps<"/admin/members/[
       </section>
       <aside className="card p-5">
         <h2 className="h2 mb-3">操作</h2>
-        <MemberActions userId={u.id} status={u.status} role={u.role} quota={u.inviteQuotaOverride} viewerIsOwner={viewer.role === "owner"} isSelf={u.id === viewer.id} targetMfa={targetMfa} />
+        <MemberActions userId={u.id} status={u.status} role={u.role} quota={u.inviteQuotaOverride} isSelf={u.id === viewer.id} />
       </aside>
     </div>
   );

@@ -10,7 +10,6 @@ import {
   setInviteQuota,
   setRole,
   suspendUser,
-  transferOwnership,
   type RejectReasonKey,
 } from "@/server/services/admin";
 import { resolveCase } from "@/server/services/reports";
@@ -56,9 +55,6 @@ export async function memberAdminAction(_: FormState, fd: FormData): Promise<For
       case "role":
         await setRole(db, viewer!, userId, str(fd, "role") as "member" | "admin");
         return "権限を変更しました。";
-      case "transfer":
-        await transferOwnership(db, viewer!, userId, { password: str(fd, "password"), code: str(fd, "code") });
-        return "オーナー権限を移しました。";
       case "quota": {
         const raw = str(fd, "quota").trim();
         await setInviteQuota(db, viewer!, userId, raw === "" ? null : Number(raw));
@@ -68,11 +64,6 @@ export async function memberAdminAction(_: FormState, fd: FormData): Promise<For
         throw new AppError("invalid", "操作を選んでください。");
     }
   });
-  if (res?.ok && op === "transfer") {
-    // 自分はオーナーではなくなるので、画面の出し分けごと読み直す
-    await setFlash("ok", res.ok);
-    redirect(`/admin/members/${userId}`);
-  }
   if (res?.ok) refresh();
   return res;
 }

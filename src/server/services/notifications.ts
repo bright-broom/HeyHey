@@ -22,10 +22,11 @@ export type NotificationType =
   | "group_join_approved"
   | "message"
   | "event_rsvp"
-  | "event_canceled";
+  | "event_canceled"
+  | "admin_changed";
 
 /** 運営の通知（審査・通報）。管理者個人のブロック・ミュートでは止めない */
-export const OPS_NOTIFICATION_TYPES: NotificationType[] = ["application_submitted", "application_overdue", "report_submitted", "ownership_transferred", "moderation", "report_resolved"];
+export const OPS_NOTIFICATION_TYPES: NotificationType[] = ["application_submitted", "application_overdue", "report_submitted", "ownership_transferred", "moderation", "report_resolved", "admin_changed"];
 
 export async function notify(
   db: DbOrTx,

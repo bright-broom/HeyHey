@@ -2,20 +2,22 @@ import { databaseUrl, isHttps } from "./env";
 
 /**
  * デモアカウントの台帳。シード（scripts/seed.ts --demo）とログイン画面のデモ一覧の両方がここを読む。
- * 権限（オーナー／管理者／会員）と状態（2 段階認証・規約同意・申請中・停止など）の組み合わせを、
+ * 権限（管理者／会員）と状態（2 段階認証・規約同意・申請中・停止など）の組み合わせを、
  * 画面で確かめたい単位で 1 人ずつ用意する。
  */
 export const DEMO_PASSWORD = "demo-password-123";
-/** デモのオーナー・管理者などの 2 段階認証の鍵（ローカル専用。認証アプリに手入力すればコードが出る） */
+/** デモの管理者などの 2 段階認証の鍵（ローカル専用。認証アプリに手入力すればコードが出る） */
 export const DEMO_TOTP_SECRET = "KAKOMIDEMOKAKOMIDEMOKAKOMIDEMO23";
 
-export type DemoGroup = "owner" | "admin" | "member" | "applicant" | "blocked";
+export type DemoGroup = "admin" | "member" | "applicant" | "blocked";
 
 export type DemoAccount = {
   email: string;
   name: string;
   group: DemoGroup;
-  role: "owner" | "admin" | "member";
+  role: "admin" | "member";
+  /** 最初の管理者（シードが作る人と同じ） */
+  firstAdmin?: boolean;
   status: "active" | "pending" | "unverified" | "suspended" | "rejected";
   /** 状態の短い名前（一覧のラベル） */
   label: string;
@@ -29,7 +31,7 @@ export type DemoAccount = {
 };
 
 export const DEMO_ACCOUNTS: DemoAccount[] = [
-  { email: "owner@example.com", name: "オーナー", group: "owner", role: "owner", status: "active", mfa: true, label: "オーナー", tryThis: "すべての管理機能、管理者の任命、管理者への処分", affiliation: "運営" },
+  { email: "owner@example.com", name: "運営", group: "admin", role: "admin", firstAdmin: true, status: "active", mfa: true, label: "管理者（最初の 1 人）", tryThis: "すべての管理機能。管理者の任命・解任（ほかの管理者に知らされる）", affiliation: "運営" },
   { email: "admin@example.com", name: "管理 花子", group: "admin", role: "admin", status: "active", mfa: true, label: "管理者", tryThis: "入会審査（72 時間超過の申請あり）、通報対応、監査ログ", affiliation: "運営チーム", bio: "入会審査と通報対応を担当しています。" },
   { email: "admin-new@example.com", name: "新任 管理者", group: "admin", role: "admin", status: "active", label: "管理者・2 段階認証 未設定", tryThis: "管理画面に入れず、2 段階認証の設定へ案内される（設定にはチケットが必要）", affiliation: "運営チーム" },
   { email: "sato@example.com", name: "佐藤 健", group: "member", role: "member", status: "active", label: "会員", tryThis: "投稿・画像・招待リンクの発行、田中さんの「友達のみ」投稿が見える", affiliation: "株式会社サンプル", bio: "週末は山登りをしています。" },
@@ -44,7 +46,6 @@ export const DEMO_ACCOUNTS: DemoAccount[] = [
 ];
 
 export const DEMO_GROUP_LABELS: Record<DemoGroup, string> = {
-  owner: "オーナー",
   admin: "管理者",
   member: "会員",
   applicant: "申請者",

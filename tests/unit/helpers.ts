@@ -17,7 +17,7 @@ export async function db(): Promise<Db> {
 
 /**
  * テスト用の会員を直接作る（既定：承認済み・規約同意済みの一般会員）。
- * 管理者・オーナーは既定で 2 段階認証を有効にしておく（mfa: false で未設定の管理者を作れる）
+ * 管理者は既定で 2 段階認証を有効にしておく（mfa: false で未設定の管理者を作れる）
  */
 export async function makeUser(
   d: Db,

@@ -13,7 +13,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   return (
     <div>
       <div className="mb-12 flex flex-wrap items-center gap-x-8 border-b border-line">
-        <span className="plaque py-4 text-ink">{viewer.role === "owner" ? "OWNER" : "ADMIN"}</span>
+        <span className="plaque py-4 text-ink">ADMIN</span>
         <NavLinks items={tabs} label="管理メニュー" />
       </div>
       {children}

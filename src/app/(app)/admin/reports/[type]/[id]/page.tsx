@@ -22,7 +22,7 @@ export default async function ReportCasePage(props: PageProps<"/admin/reports/[t
     throw e;
   }
   const { reports, content, author, open } = data;
-  const canSuspend = author.role === "member" || (author.role === "admin" && viewer.role === "owner");
+  const canSuspend = author.id !== viewer.id;
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
       <div className="space-y-4">

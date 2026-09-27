@@ -81,7 +81,7 @@ export async function groupAction(fd: FormData) {
         break;
       case "transfer":
         await transferGroupOwnership(db, viewer!, groupId, userId);
-        message = "管理人を移しました。";
+        message = "代表を移しました。";
         break;
       case "unban":
         await unbanMember(db, viewer!, groupId, userId);
@@ -89,7 +89,7 @@ export async function groupAction(fd: FormData) {
         break;
       case "assign_owner":
         await assignGroupOwnerByAdmin(db, viewer!, groupId, userId);
-        message = "管理人を指定しました。";
+        message = "代表を指定しました。";
         break;
       case "archive":
       case "unarchive":

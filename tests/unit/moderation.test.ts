@@ -88,15 +88,15 @@ describe("通報と自動非表示", () => {
 });
 
 describe("管理権限の境界", () => {
-  it("管理者はオーナー・他の管理者・自分を停止できない。オーナーは管理者を停止できる", async () => {
-    const owner = await makeUser(d, { role: "owner" });
+  it("管理者は自分を停止できない。ほかの管理者は停止でき、そのことは管理者全員に知らされる", async () => {
     const admin = await makeUser(d, { role: "admin" });
     const admin2 = await makeUser(d, { role: "admin" });
-    await expect(suspendUser(d, admin.viewer, owner.user.id, "x")).rejects.toMatchObject({ code: "forbidden" });
-    await expect(suspendUser(d, admin.viewer, admin2.user.id, "x")).rejects.toMatchObject({ code: "forbidden" });
+    const witness = await makeUser(d, { role: "admin" });
     await expect(suspendUser(d, admin.viewer, admin.user.id, "x")).rejects.toMatchObject({ code: "forbidden" });
-    await suspendUser(d, owner.viewer, admin2.user.id, "権限の乱用");
-    await reinstateUser(d, owner.viewer, admin2.user.id);
+    await suspendUser(d, admin.viewer, admin2.user.id, "権限の乱用");
+    const seen = await d.select().from(notifications).where(and(eq(notifications.userId, witness.user.id), eq(notifications.type, "admin_changed")));
+    expect(seen.at(-1)!.data).toMatchObject({ change: "停止" });
+    await reinstateUser(d, admin.viewer, admin2.user.id);
   });
 
   it("停止理由は必須", async () => {
@@ -105,12 +105,12 @@ describe("管理権限の境界", () => {
     await expect(suspendUser(d, admin.viewer, m.user.id, "  ")).rejects.toMatchObject({ code: "invalid" });
   });
 
-  it("管理者の任命はオーナーだけ。一般会員は招待枠を変えられない", async () => {
-    const owner = await makeUser(d, { role: "owner" });
+  it("管理者の任命は管理者なら誰でも。会員は任命も招待枠の変更もできない", async () => {
     const admin = await makeUser(d, { role: "admin" });
     const m = await makeUser(d);
-    await expect(setRole(d, admin.viewer, m.user.id, "admin")).rejects.toMatchObject({ code: "forbidden" });
-    await setRole(d, owner.viewer, m.user.id, "admin");
+    const other0 = await makeUser(d);
+    await expect(setRole(d, other0.viewer, m.user.id, "admin")).rejects.toMatchObject({ code: "forbidden" });
+    await setRole(d, admin.viewer, m.user.id, "admin");
     const [u] = await d.select().from(users).where(eq(users.id, m.user.id));
     expect(u!.role).toBe("admin");
     const other = await makeUser(d);
@@ -189,8 +189,9 @@ describe("友達と退会", () => {
     expect(await getPost(d, reader.viewer, p.id)).toBeNull();
   });
 
-  it("オーナーは退会できない", async () => {
-    const o = await makeUser(d, { role: "owner" });
-    await expect(withdraw(d, o.viewer, { password: PASSWORD, mode: "delete" })).rejects.toMatchObject({ code: "forbidden" });
+  it("管理者も、ほかに管理者がいれば退会できる", async () => {
+    await makeUser(d, { role: "admin" });
+    const o = await makeUser(d, { role: "admin" });
+    await withdraw(d, o.viewer, { password: PASSWORD, mode: "delete" });
   });
 });

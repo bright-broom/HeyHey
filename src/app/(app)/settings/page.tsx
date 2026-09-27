@@ -94,13 +94,7 @@ export default async function SettingsPage() {
       </section>
       <section className="space-y-6 border border-danger/40 p-6 sm:p-8">
         <h2 className="h2 text-danger">退会</h2>
-        {viewer.role === "owner" ? (
-          <p className="text-sm text-muted">
-            オーナーは退会できません。先に、2 段階認証を設定済みの管理者へオーナー権限を移してください（管理画面の「会員管理」から、その管理者の画面で行えます）。
-          </p>
-        ) : (
-          <WithdrawForm />
-        )}
+        <WithdrawForm />
       </section>
     </div>
   );

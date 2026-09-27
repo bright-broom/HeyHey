@@ -3,12 +3,12 @@
  *   npm run db:seed            … オーナーアカウントを 1 つ作る（会員が 0 人のときだけ）
  *   npm run db:seed -- --demo  … 動作確認用のデモ会員・投稿・申請・通報も作る
  *
- * オーナーは OWNER_EMAIL / OWNER_PASSWORD / OWNER_NAME で指定できる。
+ * 最初の管理者は OWNER_EMAIL / OWNER_PASSWORD / OWNER_NAME で指定できる（名前は互換のため）。
  * パスワード未指定なら安全な乱数で生成して 1 回だけ表示する。
  */
 import { randomBytes } from "node:crypto";
 import sharp from "sharp";
-import { eq, sql } from "drizzle-orm";
+import { asc, eq, inArray, or, sql } from "drizzle-orm";
 import { closeDb, getDb, type Db } from "../src/server/db/client";
 import { applications, conversations, events, friendships, groupMembers, groups, profiles, userMfa, users, type User } from "../src/server/db/schema";
 import { DEMO_ACCOUNTS, DEMO_PASSWORD, DEMO_TOTP_SECRET, type DemoAccount } from "../src/server/lib/demo";
@@ -23,7 +23,7 @@ import { sendMessage } from "../src/server/services/messages";
 
 const DAY = 86400_000;
 
-async function createUser(db: Db, o: { email: string; name: string; password: string; role?: "member" | "admin" | "owner"; invitedById?: string | null; affiliation?: string; bio?: string }) {
+async function createUser(db: Db, o: { email: string; name: string; password: string; role?: "member" | "admin"; invitedById?: string | null; affiliation?: string; bio?: string }) {
   const now = new Date();
   const [u] = await db
     .insert(users)
@@ -56,13 +56,13 @@ async function main() {
   if (n === 0) {
     const email = process.env.OWNER_EMAIL ?? "owner@example.com";
     const password = process.env.OWNER_PASSWORD ?? (demo ? DEMO_PASSWORD : randomBytes(12).toString("base64url"));
-    const name = process.env.OWNER_NAME ?? "オーナー";
-    await createUser(db, { email, name, password, role: "owner", affiliation: "運営" });
-    console.log("✓ オーナーを作成しました");
+    const name = process.env.OWNER_NAME ?? "運営";
+    await createUser(db, { email, name, password, role: "admin", affiliation: "運営" });
+    console.log("✓ 最初の管理者を作成しました（環境変数の名前は互換のため OWNER_* のまま）");
     console.log(`  メール     : ${email}`);
     if (!process.env.OWNER_PASSWORD) console.log(`  パスワード : ${password}${demo ? "" : "   ← この表示は 1 回だけです。控えてください"}`);
   } else {
-    console.log(`・会員が ${n} 人いるため、オーナーの作成はスキップしました`);
+    console.log(`・会員が ${n} 人いるため、最初の管理者の作成はスキップしました`);
   }
 
   if (demo) await seedDemo(db);
@@ -93,7 +93,10 @@ const APPLICATIONS: Record<string, { relationship: string; introduction: string;
 
 /** 台帳のアカウントを 1 人ずつ用意する。すでにいる人はそのまま使うので、何度流してもよい */
 async function ensureDemoAccount(db: Db, a: DemoAccount, byEmail: Map<string, User>): Promise<{ user: User; created: boolean }> {
-  const [existing] = a.role === "owner" ? await db.select().from(users).where(eq(users.role, "owner")).limit(1) : await db.select().from(users).where(eq(users.email, a.email));
+  // 最初の管理者（シードが OWNER_EMAIL で作った人）は、メールが違っても同じ人として扱う
+  const [existing] = a.firstAdmin
+    ? await db.select().from(users).where(or(eq(users.email, a.email), inArray(users.role, ["admin", "owner"]))).orderBy(asc(users.createdAt)).limit(1)
+    : await db.select().from(users).where(eq(users.email, a.email));
   let user = existing;
   if (!user) {
     const now = Date.now();
@@ -153,14 +156,14 @@ async function seedDemo(db: Db) {
 
   console.log(created.length ? `✓ デモアカウントを ${created.length} 人追加しました` : "・デモアカウントはすべて作成済みです");
   console.log(`  パスワードはすべて ${DEMO_PASSWORD}。ローカルの開発サーバーでは、ログイン画面の「デモアカウント」から 1 クリックでも入れます`);
-  console.log(`  2 段階認証が有効な人（オーナー・管理者・高橋さん）の鍵：${DEMO_TOTP_SECRET}`);
+  console.log(`  2 段階認証が有効な人（管理者・高橋さん）の鍵：${DEMO_TOTP_SECRET}`);
   for (const a of DEMO_ACCOUNTS) console.log(`  ${a.email.padEnd(24)} ${a.label}`);
 }
 
 /**
  * デモのグループ（名前で見つかれば作らない）。
- * - 山歩きの会：参加自由。佐藤さんがオーナー、田中さん・高橋さんがメンバー
- * - 読書会：承認制。田中さんがオーナー、鈴木さんが承認待ち（管理役の画面を試せる）
+ * - 山歩きの会：参加自由。佐藤さんが代表、田中さん・高橋さんがメンバー
+ * - 読書会：承認制。田中さんが代表、鈴木さんが承認待ち（代表の画面を試せる）
  */
 async function ensureDemoGroups(db: Db, byEmail: Map<string, User>) {
   const get = (email: string) => byEmail.get(email)!;
@@ -187,7 +190,7 @@ async function ensureDemoGroups(db: Db, byEmail: Map<string, User>) {
 
 /**
  * デモのイベントとメッセージ（まだ 1 件もなければ作る）。
- * - 全会員向けの「新年会」（オーナー）と、山歩きの会の「高尾山ハイク」（佐藤さん）
+ * - 全会員向けの「新年会」（運営）と、山歩きの会の「高尾山ハイク」（佐藤さん）
  * - 佐藤さんと田中さんのメッセージのやりとり
  */
 async function ensureDemoEventsAndMessages(db: Db, byEmail: Map<string, User>) {

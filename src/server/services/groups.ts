@@ -14,9 +14,9 @@ import { consume } from "./ratelimit";
  * グループ（F-15）。
  * - 名前と説明は全会員に見せる。投稿・メンバー一覧はそのグループのアクティブなメンバーにだけ見せる
  *   （投稿の判定は lib/visibility の visiblePost。ここでは参加・管理の操作を扱う）
- * - 役割は「管理人」（1 人。DB の値は owner）と「メンバー」の 2 つだけ
- * - open は誰でもすぐ参加、approval は管理人の承認が必要
- * - 参加の承認・メンバーを外す・管理人の移譲・グループを閉じるのは管理人
+ * - 役割は「代表」（1 人。DB の値は owner）と「メンバー」の 2 つだけ
+ * - open は誰でもすぐ参加、approval は代表の承認が必要
+ * - 参加の承認・メンバーを外す・代表の移譲・グループを閉じるのは代表
  *   （サイトの管理者も、運営上の必要があれば閉じられる。監査ログに残す）
  */
 
@@ -30,13 +30,13 @@ const groupSchema = z.object({
   joinPolicy: z.enum(["open", "approval"], { message: "参加のしかたを選んでください。" }),
 });
 
-/** 同時の操作で管理人が 2 人になりかけたとき（DB の一意制約）は、状態が変わったことにする */
+/** 同時の操作で代表が 2 人になりかけたとき（DB の一意制約）は、状態が変わったことにする */
 async function oneOwner<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (e) {
     const code = (e as { code?: string; cause?: { code?: string } }).code ?? (e as { cause?: { code?: string } }).cause?.code;
-    if (code === "23505") throw conflict("ほかの操作と重なったため、管理人を変更できませんでした。もう一度お試しください。");
+    if (code === "23505") throw conflict("ほかの操作と重なったため、代表を変更できませんでした。もう一度お試しください。");
     throw e;
   }
 }
@@ -130,7 +130,7 @@ export async function getGroup(db: Db, viewer: Viewer, groupId: string) {
     canManage: isManager(me) && !g.archivedAt,
     isOwner: active && me?.role === "owner",
     canArchive: (active && me?.role === "owner") || isAdmin(viewer),
-    /** サイトの管理者は、メンバー一覧を見て管理人を指定し直せる（グループの投稿は見えない） */
+    /** サイトの管理者は、メンバー一覧を見て代表を指定し直せる（グループの投稿は見えない） */
     adminView: isAdmin(viewer),
   };
 }
@@ -185,12 +185,12 @@ export async function joinGroup(db: Db, viewer: Viewer, groupId: string): Promis
   });
 }
 
-/** 退出（参加申請の取り消しも同じ）。管理人は先に管理人を移す */
+/** 退出（参加申請の取り消しも同じ）。代表は先に代表を移す */
 export async function leaveGroup(db: Db, viewer: Viewer, groupId: string) {
   assertMember(viewer);
   const { g, me } = await loadGroup(db, viewer, groupId);
   if (!me) return;
-  if (me.role === "owner") throw conflict("管理人は退出できません。先に、ほかのメンバーへ管理人を移してください。");
+  if (me.role === "owner") throw conflict("代表は退出できません。先に、ほかのメンバーへ代表を移してください。");
   await db.delete(groupMembers).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.userId, viewer.id)));
 }
 
@@ -200,7 +200,7 @@ async function assertManager(db: DbOrTx, viewer: Viewer, groupId: string) {
   assertMember(viewer);
   const { g, me } = await loadGroup(db, viewer, groupId);
   if (g.archivedAt) throw conflict("このグループは閉じられています。");
-  if (!isManager(me)) throw forbidden("グループの管理人だけが行える操作です。");
+  if (!isManager(me)) throw forbidden("グループの代表だけが行える操作です。");
   return { g, me: me! };
 }
 
@@ -227,14 +227,14 @@ export async function respondJoinRequest(db: Db, viewer: Viewer, groupId: string
   });
 }
 
-/** メンバーを外す（管理人だけ）。管理人は外せない */
+/** メンバーを外す（代表だけ）。代表は外せない */
 export async function removeMember(db: Db, viewer: Viewer, groupId: string, userId: string) {
   const { g, me } = await assertManager(db, viewer, groupId);
   if (userId === viewer.id) throw invalid("自分を外すときは「退出」を使ってください。");
   const t = await targetMembership(db, g.id, userId);
-  if (t.role === "owner") throw forbidden("管理人は外せません。");
+  if (t.role === "owner") throw forbidden("代表は外せません。");
   await db.transaction(async (tx) => {
-    // 確認した役割のままのときだけ外す（同時に管理人を移された人を外してしまわないように）
+    // 確認した役割のままのときだけ外す（同時に代表を移された人を外してしまわないように）
     const allowed = ["member", "moderator"];
     const [gone] = await tx
       .delete(groupMembers)
@@ -266,10 +266,10 @@ export async function unbanMember(db: Db, viewer: Viewer, groupId: string, userI
   await audit(db, { actorId: viewer.id, action: "group.unban_member", targetType: "group", targetId: g.id, meta: { userId } });
 }
 
-/** 管理人を移す。移した後、元の管理人はメンバーになる（管理人が 2 人にならないよう条件付きで先に降格） */
+/** 代表を移す。移した後、元の代表はメンバーになる（代表が 2 人にならないよう条件付きで先に降格） */
 export async function transferGroupOwnership(db: Db, viewer: Viewer, groupId: string, userId: string) {
   const { g, me } = await assertManager(db, viewer, groupId);
-  if (me.role !== "owner") throw forbidden("管理人だけが行える操作です。");
+  if (me.role !== "owner") throw forbidden("代表だけが行える操作です。");
   if (userId === viewer.id) throw invalid("自分自身には移せません。");
   const t = await targetMembership(db, g.id, userId);
   if (t.status !== "active") throw conflict("参加中のメンバーにだけ移せます。");
@@ -281,7 +281,7 @@ export async function transferGroupOwnership(db: Db, viewer: Viewer, groupId: st
       .set({ role: "member" })
       .where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.userId, viewer.id), eq(groupMembers.role, "owner")))
       .returning({ userId: groupMembers.userId });
-    if (!demoted) throw conflict("すでに管理人ではありません。");
+    if (!demoted) throw conflict("すでに代表ではありません。");
     const [promoted] = await tx
       .update(groupMembers)
       .set({ role: "owner" })
@@ -306,14 +306,14 @@ export async function updateGroup(db: Db, viewer: Viewer, groupId: string, raw: 
   }
 }
 
-/** グループを閉じる（投稿は誰にも見えなくなる。削除はしない）。管理人か、サイトの管理者 */
+/** グループを閉じる（投稿は誰にも見えなくなる。削除はしない）。代表か、サイトの管理者 */
 export async function setGroupArchived(db: Db, viewer: Viewer, groupId: string, archived: boolean) {
   assertMember(viewer);
   const { g, me } = await loadGroup(db, viewer, groupId);
   const owner = me?.status === "active" && me.role === "owner";
-  if (!owner && !isAdmin(viewer)) throw forbidden("グループを閉じられるのは、管理人かサイトの管理者だけです。");
+  if (!owner && !isAdmin(viewer)) throw forbidden("グループを閉じられるのは、代表かサイトの管理者だけです。");
   if (!archived && !(await hasActiveOwner(db, g.id))) {
-    throw conflict("管理人がいないため再開できません。先にサイトの管理者が管理人を指定してください。");
+    throw conflict("代表がいないため再開できません。先にサイトの管理者が代表を指定してください。");
   }
   await db.update(groups).set({ archivedAt: archived ? new Date() : null, updatedAt: new Date() }).where(eq(groups.id, g.id));
   await audit(db, { actorId: viewer.id, action: archived ? "group.archive" : "group.unarchive", targetType: "group", targetId: g.id, meta: { byAdmin: !owner } });
@@ -329,19 +329,19 @@ async function hasActiveOwner(db: DbOrTx, groupId: string): Promise<boolean> {
 }
 
 /**
- * サイトの管理者による管理人の指定（管理人が退会・停止してグループを管理できなくなったとき）。
- * 相手はそのグループのアクティブなメンバー。いまの管理人がいればメンバーに戻す。監査ログに残す。
+ * サイトの管理者による代表の指定（代表が退会・停止してグループを管理できなくなったとき）。
+ * 相手はそのグループのアクティブなメンバー。いまの代表がいればメンバーに戻す。監査ログに残す。
  */
 export async function assignGroupOwnerByAdmin(db: Db, viewer: Viewer, groupId: string, userId: string) {
   assertMember(viewer);
   if (!isAdmin(viewer)) throw forbidden("サイトの管理者だけが行える操作です。");
   const { g } = await loadGroup(db, viewer, groupId);
-  if (userId === viewer.id) throw invalid("自分自身は管理人に指定できません。");
-  // いまの管理人が活動中なら、その人の判断（移譲）に任せる。指定できるのは不在（退会・停止）のときだけ
-  if (await hasActiveOwner(db, g.id)) throw conflict("管理人がいるグループでは指定できません。管理人本人に移譲してもらってください。");
+  if (userId === viewer.id) throw invalid("自分自身は代表に指定できません。");
+  // いまの代表が活動中なら、その人の判断（移譲）に任せる。指定できるのは不在（退会・停止）のときだけ
+  if (await hasActiveOwner(db, g.id)) throw conflict("代表がいるグループでは指定できません。代表本人に移譲してもらってください。");
   const t = await targetMembership(db, g.id, userId);
   const [u] = await db.select({ status: users.status }).from(users).where(eq(users.id, userId));
-  if (t.status !== "active" || u?.status !== "active") throw conflict("参加中のメンバーだけを管理人にできます。");
+  if (t.status !== "active" || u?.status !== "active") throw conflict("参加中のメンバーだけを代表にできます。");
   await oneOwner(() => db.transaction(async (tx) => {
     await tx.update(groupMembers).set({ role: "member" }).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.role, "owner")));
     const [done] = await tx
@@ -354,7 +354,7 @@ export async function assignGroupOwnerByAdmin(db: Db, viewer: Viewer, groupId: s
   }));
 }
 
-/** 退会の前に確認：グループ（閉じたものも含む）の管理人なら、先に移してもらう */
+/** 退会の前に確認：グループ（閉じたものも含む）の代表なら、先に移してもらう */
 export async function ownedGroups(db: DbOrTx, userId: string): Promise<string[]> {
   const rows = await db
     .select({ name: groups.name })

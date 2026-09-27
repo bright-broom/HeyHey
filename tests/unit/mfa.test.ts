@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "@/server/db/client";
 import { auditLogs, loginChallenges, mfaRecoveryCodes, sessions, userMfa } from "@/server/db/schema";
-import { assertAdmin, assertOwner, hasAdminRole, isAdmin, monthlyInviteQuota } from "@/server/lib/policy";
+import { assertAdmin, hasAdminRole, isAdmin, monthlyInviteQuota } from "@/server/lib/policy";
 import { open, seal } from "@/server/lib/secretbox";
 import { base32Decode, base32Encode, totpCode, totpStep, verifyTotp } from "@/server/lib/totp";
 import { listApplications, setRole, suspendUser } from "@/server/services/admin";
@@ -102,8 +102,6 @@ describe("管理権限は 2 段階認証が前提", () => {
     await expect(listApplications(d, admin.viewer)).rejects.toMatchObject({ code: "forbidden" });
     expect(monthlyInviteQuota(admin.viewer, null)).toBe(3);
 
-    const owner = await makeUser(d, { role: "owner", mfa: false });
-    expect(() => assertOwner(owner.viewer)).toThrow(/2 段階認証/);
   });
 
   it("設定済みなら従来どおり管理機能を使える。セッションからも mfa の状態を毎回読み直す", async () => {
@@ -192,7 +190,7 @@ describe("設定（有効化）", () => {
   });
 
   it("管理者に任命すると、会員のうちに設定した 2 段階認証は破棄され、チケットで設定し直すまで権限が働かない", async () => {
-    const owner = await makeUser(d, { role: "owner" });
+    const owner = await makeUser(d, { role: "admin" });
     const m = await makeUser(d);
     // パスワードだけを知る攻撃者が、会員のうちに自分の認証アプリを登録していた、とする
     await enroll(m.viewer);
@@ -295,7 +293,7 @@ describe("ログインの 2 段階目", () => {
   });
 
   it("チャレンジの発行後に停止されたら、正しいコードでもログインできない", async () => {
-    const owner = await makeUser(d, { role: "owner" });
+    const owner = await makeUser(d, { role: "admin" });
     const m = await enrolled();
     const c = await login(d, { email: m.user.email, password: PASSWORD, ip: "7.7.7.6" });
     if (c.ok !== "mfa") throw new Error("expected mfa");

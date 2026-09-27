@@ -73,7 +73,7 @@ export async function requireMember(): Promise<Viewer> {
   return v;
 }
 
-/** 管理者以上でも 2 段階認証が未設定なら、管理画面ではなく設定画面へ案内する */
+/** 管理者でも 2 段階認証が未設定なら、管理画面ではなく設定画面へ案内する */
 export async function requireAdmin(): Promise<Viewer> {
   const v = await requireMember();
   if (hasAdminRole(v) && !v.mfa) redirect("/settings/security?required=1");

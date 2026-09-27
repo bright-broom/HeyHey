@@ -101,9 +101,8 @@ export async function revokeInvitation(db: Db, viewer: Viewer, invitationId: str
     .then((r) => (r[0] ? [{ ...r[0].inv, creatorRole: r[0].creatorRole }] : []));
   if (!inv) throw notFound();
   if (inv.createdById !== viewer.id) {
+    // 他人の招待を取り消せるのは管理者（管理者どうしは対等）
     if (!isAdmin(viewer)) throw forbidden();
-    // 管理者はオーナー・他の管理者の招待を取り消せない（オーナーは可）
-    if (inv.creatorRole === "owner" || (inv.creatorRole === "admin" && viewer.role !== "owner")) throw forbidden();
   }
   if (inv.revokedAt) return;
   await db.transaction(async (tx) => {
