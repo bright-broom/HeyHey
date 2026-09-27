@@ -2,6 +2,7 @@ import Link from "next/link";
 import { PageTitle } from "@/components/PageTitle";
 import { PostCard } from "@/components/PostCard";
 import { getDb } from "@/server/db/client";
+import { AppError } from "@/server/lib/errors";
 import { listFeed, SEARCH_MAX } from "@/server/services/posts";
 import { requireMember } from "@/server/web/session";
 
@@ -16,7 +17,16 @@ export default async function SearchPage(props: PageProps<"/search">) {
   const sp = await props.searchParams;
   const q = (typeof sp.q === "string" ? sp.q : "").trim().slice(0, SEARCH_MAX);
   const before = typeof sp.before === "string" ? new Date(sp.before) : null;
-  const result = q ? await listFeed(await getDb(), viewer, { q, before }) : null;
+  let result: Awaited<ReturnType<typeof listFeed>> | null = null;
+  let error: string | null = null;
+  if (q) {
+    try {
+      result = await listFeed(await getDb(), viewer, { q, before });
+    } catch (e) {
+      if (!(e instanceof AppError)) throw e;
+      error = e.message;
+    }
+  }
   return (
     <div className="max-w-2xl">
       <PageTitle plaque="SEARCH" title="投稿を検索" />
@@ -31,6 +41,7 @@ export default async function SearchPage(props: PageProps<"/search">) {
         />
         <button className="btn-primary">探す</button>
       </form>
+      {error && <p role="alert" className="border-t border-line py-16 text-center text-sm text-danger">{error}</p>}
       {result && result.posts.length === 0 && <p className="border-t border-line py-16 text-center text-sm text-muted">「{q}」を含む投稿は見つかりませんでした。</p>}
       {result?.posts.map((p) => (
         <PostCard key={p.id} post={p} />

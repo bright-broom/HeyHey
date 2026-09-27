@@ -3,9 +3,10 @@ import { z } from "zod";
 import type { Db } from "../db/client";
 import { AppError, invalid } from "../lib/errors";
 import { assertMember } from "../lib/policy";
+import { Mp4Error, stripMp4Metadata } from "../lib/mp4";
 import type { Viewer } from "../lib/viewer";
 import { consume } from "./ratelimit";
-import { readStagedFile, removeStoredFile, STAGING_RE, storeFile } from "./storage";
+import { countStaging, purgeStaleStaging, readStagedFile, removeStoredFile, STAGING_RE, storeFile } from "./storage";
 
 /**
  * 動画・ファイルの添付（F-13）。
@@ -37,7 +38,8 @@ export function cleanFileName(name: string, ext: string): string {
   const base = name
     .split(/[\\/]/)
     .pop()!
-    .replace(/[\u0000-\u001f\u007f"<>|:*?]/g, "")
+    // 制御文字と、表示の向きを変える文字（拡張子を偽って見せる手口に使われる）を除く
+    .replace(/[\u0000-\u001f\u007f\u200e\u200f\u202a-\u202e\u2066-\u2069"<>|:*?]/g, "")
     .replace(/\.[^.]*$/, "")
     .trim()
     .slice(0, 100);
@@ -51,8 +53,11 @@ export function stagingRuleFor(viewer: Viewer, key: string): Rule | null {
   return ATTACHMENT_RULES[m[2]!] ?? null;
 }
 
-/** 1 時間に一時置き場へ上げられる数（容量を使い潰させない） */
-const UPLOADS_PER_HOUR = 30;
+/** 1 時間に一時置き場へ上げられる数と、投稿せずに置いておける数（容量を使い潰させない） */
+const UPLOADS_PER_HOUR = 12;
+export const MAX_STAGED = 4;
+/** これより古い一時置き場のファイルは、次に上げるときに消す（定期処理でも消す） */
+export const STAGING_TTL_MS = 60 * 60 * 1000;
 
 /**
  * 一時置き場へのアップロードを許すか。承認済み会員が、自分の一時置き場の、許した種類のキーに上げるときだけ。
@@ -64,6 +69,10 @@ export async function authorizeStagingUpload(db: Db, viewer: Viewer | null, key:
   if (!rule) throw invalid("この種類のファイルは添付できません（動画は MP4 / MOV、ファイルは PDF・Word・Excel・PowerPoint）。");
   if (!(await consume(db, `upload:${viewer.id}`, UPLOADS_PER_HOUR, 60 * 60))) {
     throw new AppError("rate_limited", "短時間にアップロードが集中しています。少し時間をおいてください。");
+  }
+  await purgeStaleStaging(new Date(Date.now() - STAGING_TTL_MS), viewer.id);
+  if ((await countStaging(viewer.id)) >= MAX_STAGED) {
+    throw new AppError("rate_limited", "投稿していない添付が多すぎます。いったん投稿するか、1 時間ほどおいてからやり直してください。");
   }
   return rule;
 }
@@ -81,48 +90,19 @@ export async function claimAttachment(viewer: Viewer, input: { key: string; name
     const data = await readStagedFile(input.key, rule.max);
     if (!data) throw invalid(`${rule.label}は ${rule.max / MB}MB までです（見つからない場合は、もう一度選んでください）。`);
     if (!rule.sniff(data)) throw invalid(`${rule.label}のファイルとして読み込めませんでした。`);
-    const out = rule.mime.startsWith("video/") ? stripMp4Metadata(data) : data;
+    let out = data;
+    if (rule.mime.startsWith("video/")) {
+      try {
+        out = stripMp4Metadata(data); // その場で書き換える（大きな動画を 2 重に持たない）
+      } catch (e) {
+        if (!(e instanceof Mp4Error)) throw e;
+        throw invalid("この動画は受け付けられません（撮影場所などの情報を確実に消せない形式です）。スマホのカメラで撮った MP4 / MOV をお使いください。");
+      }
+    }
     const key = `${randomUUID()}.${rule.ext}`;
     await storeFile(key, out, rule.mime);
     return { key, mime: rule.mime, bytes: out.byteLength, fileName: cleanFileName(input.name, rule.ext) };
   } finally {
     await removeStoredFile(input.key);
   }
-}
-
-/**
- * mp4 / mov のメタデータ（撮影場所・機種・作成者など）を消す。
- * moov・trak の中の udta / meta / uuid / XMP_ の箱を、中身をゼロで塗りつぶした free（空き領域）に書き換える
- * （種類だけ変えると、座標などの文字がファイルの中に残る）。
- * 箱の大きさも位置も変えないので、映像・音声のデータの参照（オフセット）は壊れない。
- */
-const CONTAINERS = new Set(["moov", "trak"]);
-const METADATA = new Set(["udta", "meta", "uuid", "XMP_"]);
-
-export function stripMp4Metadata(input: Buffer): Buffer {
-  const out = Buffer.from(input);
-  const walk = (start: number, end: number) => {
-    let p = start;
-    while (p + 8 <= end) {
-      let size = out.readUInt32BE(p);
-      const type = out.toString("latin1", p + 4, p + 8);
-      let header = 8;
-      if (size === 1) {
-        if (p + 16 > end) return;
-        size = Number(out.readBigUInt64BE(p + 8));
-        header = 16;
-      } else if (size === 0) {
-        size = end - p;
-      }
-      if (size < header || p + size > end) return;
-      if (METADATA.has(type)) {
-        out.write("free", p + 4, "latin1");
-        out.fill(0, p + header, p + size);
-      }
-      else if (CONTAINERS.has(type)) walk(p + header, p + size);
-      p += size;
-    }
-  };
-  walk(0, out.length);
-  return out;
 }

@@ -230,7 +230,11 @@ export async function listFeed(db: Db, viewer: Viewer, opts: { before?: Date | n
   assertMember(viewer);
   const conds = [visiblePost(viewer.id)];
   const q = opts.q?.trim().slice(0, SEARCH_MAX);
-  if (q) conds.push(matchesSearch(q));
+  if (q) {
+    // 検索は本文を毎回なめるので、回数を絞る（ページ送りも 1 回と数える）
+    if (!(await consume(db, `search:${viewer.id}`, 30, 60))) throw new AppError("rate_limited", "検索が続いています。少し時間をおいてください。");
+    conds.push(matchesSearch(q));
+  }
   if (opts.before && !Number.isNaN(opts.before.getTime())) conds.push(lt(posts.createdAt, opts.before));
   if (opts.groupId) conds.push(eq(posts.groupId, opts.groupId));
   if (opts.tag) conds.push(sql`EXISTS (SELECT 1 FROM ${postTags} WHERE ${postTags.postId} = ${posts.id} AND ${postTags.tag} = ${opts.tag})`);

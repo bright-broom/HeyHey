@@ -17,6 +17,8 @@ export async function PUT(req: Request) {
     const viewer = await getViewer();
     const key = `staging/${viewer?.id ?? "none"}/${randomUUID()}.${ext}`;
     const rule = await authorizeStagingUpload(await getDb(), viewer, key);
+    // 読む前に、申告された大きさで断る
+    if (Number(req.headers.get("content-length") ?? 0) > rule.max) throw new AppError("invalid", `${rule.label}は ${rule.max / 1024 / 1024}MB までです。`);
     const data = Buffer.from(await req.arrayBuffer());
     if (data.byteLength > rule.max) throw new AppError("invalid", `${rule.label}は ${rule.max / 1024 / 1024}MB までです。`);
     await storeFile(key, data, rule.mime);

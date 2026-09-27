@@ -10,7 +10,7 @@ import { randomBytes } from "node:crypto";
 import sharp from "sharp";
 import { eq, sql } from "drizzle-orm";
 import { closeDb, getDb, type Db } from "../src/server/db/client";
-import { applications, friendships, groupMembers, groups, profiles, userMfa, users, type User } from "../src/server/db/schema";
+import { applications, conversations, events, friendships, groupMembers, groups, profiles, userMfa, users, type User } from "../src/server/db/schema";
 import { DEMO_ACCOUNTS, DEMO_PASSWORD, DEMO_TOTP_SECRET, type DemoAccount } from "../src/server/lib/demo";
 import { hashPassword } from "../src/server/lib/password";
 import { seal } from "../src/server/lib/secretbox";
@@ -18,6 +18,8 @@ import { sealAad } from "../src/server/services/mfa";
 import { toViewer } from "../src/server/lib/viewer";
 import { createPost, addComment, toggleReaction } from "../src/server/services/posts";
 import { createReport } from "../src/server/services/reports";
+import { createEvent, setRsvp, toJstLocal } from "../src/server/services/events";
+import { sendMessage } from "../src/server/services/messages";
 
 const DAY = 86400_000;
 
@@ -147,6 +149,7 @@ async function seedDemo(db: Db) {
   // 投稿などの中身は、会員（佐藤さん）を初めて作ったときだけ入れる
   if (created.some((a) => a.email === "sato@example.com")) await seedContent(db, byEmail);
   await ensureDemoGroups(db, byEmail);
+  await ensureDemoEventsAndMessages(db, byEmail);
 
   console.log(created.length ? `✓ デモアカウントを ${created.length} 人追加しました` : "・デモアカウントはすべて作成済みです");
   console.log(`  パスワードはすべて ${DEMO_PASSWORD}。ローカルの開発サーバーでは、ログイン画面の「デモアカウント」から 1 クリックでも入れます`);
@@ -180,6 +183,36 @@ async function ensureDemoGroups(db: Db, byEmail: Map<string, User>) {
     made++;
   }
   if (made) console.log(`✓ デモのグループを ${made} 件作成しました（山歩きの会・読書会）`);
+}
+
+/**
+ * デモのイベントとメッセージ（まだ 1 件もなければ作る）。
+ * - 全会員向けの「新年会」（オーナー）と、山歩きの会の「高尾山ハイク」（佐藤さん）
+ * - 佐藤さんと田中さんのメッセージのやりとり
+ */
+async function ensureDemoEventsAndMessages(db: Db, byEmail: Map<string, User>) {
+  const v = (email: string) => toViewer(byEmail.get(email)!);
+  const [anyEvent] = await db.select({ id: events.id }).from(events).limit(1);
+  if (!anyEvent) {
+    const day = (n: number, time: string) => `${toJstLocal(new Date(Date.now() + n * 86400_000)).slice(0, 10)}T${time}`;
+    const party = await createEvent(db, v("owner@example.com"), { title: "新年会", description: "今年もよろしくお願いします。軽食を用意します。", location: "本社 3F ラウンジ", startsAt: day(14, "18:30"), endsAt: day(14, "21:00"), groupId: "" });
+    await setRsvp(db, v("sato@example.com"), party.id, "going");
+    await setRsvp(db, v("tanaka@example.com"), party.id, "maybe");
+    const [hiking] = await db.select({ id: groups.id }).from(groups).where(eq(groups.name, "山歩きの会"));
+    if (hiking) {
+      const h = await createEvent(db, v("sato@example.com"), { title: "高尾山ハイク", description: "稲荷山コースで山頂まで。雨天中止。", location: "高尾山口駅 改札前", startsAt: day(10, "09:00"), endsAt: "", groupId: hiking.id });
+      await setRsvp(db, v("tanaka@example.com"), h.id, "going");
+    }
+    console.log("✓ デモのイベントを作成しました（新年会・高尾山ハイク）");
+  }
+  const [anyConversation] = await db.select({ id: conversations.id }).from(conversations).limit(1);
+  if (!anyConversation) {
+    const tanaka = byEmail.get("tanaka@example.com")!;
+    const sato = byEmail.get("sato@example.com")!;
+    await sendMessage(db, v("sato@example.com"), tanaka.id, "個展のお知らせ、見ました！初日に伺います。");
+    await sendMessage(db, v("tanaka@example.com"), sato.id, "ありがとうございます。お待ちしています。");
+    console.log("✓ デモのメッセージを作成しました（佐藤さん ⇄ 田中さん）");
+  }
 }
 
 async function seedContent(db: Db, byEmail: Map<string, User>) {

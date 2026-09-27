@@ -118,7 +118,11 @@ export async function setEventHidden(db: Db, viewer: Viewer, eventId: string, hi
   assertAdmin(viewer);
   if (!z.uuid().safeParse(eventId).success) throw notFound();
   if (hidden && !reason.trim()) throw invalid("非表示にする理由を入れてください。");
-  const [e] = await db.select({ id: events.id, creatorId: events.creatorId }).from(events).where(and(eq(events.id, eventId), isNull(events.deletedAt)));
+  // 管理者から見える範囲（入っていないグループのイベントは対象外。存在も明かさない）
+  const [e] = await db
+    .select({ id: events.id, creatorId: events.creatorId })
+    .from(events)
+    .where(and(eq(events.id, eventId), or(visibleEvent(viewer.id), hiddenButOtherwiseVisible(viewer.id))));
   if (!e) throw notFound();
   await db.transaction(async (tx) => {
     await tx.update(events).set({ hiddenAt: hidden ? new Date() : null }).where(eq(events.id, e.id));
@@ -128,7 +132,7 @@ export async function setEventHidden(db: Db, viewer: Viewer, eventId: string, hi
 
 export async function setRsvp(db: Db, viewer: Viewer, eventId: string, status: string) {
   assertMember(viewer);
-  if (!(status in RSVP_LABEL)) throw invalid("出欠の選び方が正しくありません。");
+  if (!Object.hasOwn(RSVP_LABEL, status)) throw invalid("出欠の選び方が正しくありません。");
   if (!z.uuid().safeParse(eventId).success) throw notFound();
   const [e] = await db.select().from(events).where(and(eq(events.id, eventId), visibleEvent(viewer.id)));
   if (!e) throw notFound();
@@ -158,9 +162,15 @@ export type EventSummary = {
   myRsvp: RsvpStatus | null;
 };
 
-/** 見える参加者だけを数える（ブロック関係・停止中の人は数にも出さない） */
+/**
+ * 見える参加者だけを数える（ブロック関係・停止中の人は数にも出さない）。
+ * グループのイベントは、いまもそのグループのメンバーである人だけ（抜けた人の名前を残さない）
+ */
 const countableRsvp = (viewerId: string) =>
-  sql`EXISTS (SELECT 1 FROM users ru WHERE ru.id = ${eventRsvps.userId} AND ru.status = 'active') AND (${eventRsvps.userId} = ${viewerId} OR NOT ${blockedBetween(viewerId, sql`${eventRsvps.userId}`)})`;
+  sql`EXISTS (SELECT 1 FROM users ru WHERE ru.id = ${eventRsvps.userId} AND ru.status = 'active')
+    AND (${eventRsvps.userId} = ${viewerId} OR NOT ${blockedBetween(viewerId, sql`${eventRsvps.userId}`)})
+    AND EXISTS (SELECT 1 FROM events rev WHERE rev.id = ${eventRsvps.eventId}
+      AND (rev.group_id IS NULL OR ${activeInOpenGroup(sql`${eventRsvps.userId}`, sql`rev.group_id`)}))`;
 
 /** これからのイベント（開始が近い順）、または終わったイベント（新しい順） */
 export async function listEvents(db: Db, viewer: Viewer, opts: { past?: boolean; groupId?: string } = {}): Promise<EventSummary[]> {

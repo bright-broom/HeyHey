@@ -4,7 +4,8 @@ import { eq } from "drizzle-orm";
 import type { Db } from "@/server/db/client";
 import { media } from "@/server/db/schema";
 import { mentionToken } from "@/lib/richtext";
-import { authorizeStagingUpload, claimAttachment, cleanFileName, stripMp4Metadata } from "@/server/services/attachments";
+import { authorizeStagingUpload, claimAttachment, cleanFileName } from "@/server/services/attachments";
+import { stripMp4Metadata } from "@/server/lib/mp4";
 import { mediaForViewer } from "@/server/services/media";
 import { createPost, listFeed } from "@/server/services/posts";
 import { readStoredFile, storeFile } from "@/server/services/storage";
@@ -112,15 +113,15 @@ describe("動画・ファイルの添付（F-13）", () => {
 
   it("動画の位置情報などのメタデータを消す（大きさと映像データの位置は変えない）", () => {
     expect(MP4.includes("+35.6812")).toBe(true);
-    const out = stripMp4Metadata(MP4);
+    const out = stripMp4Metadata(Buffer.from(MP4));
     expect(out.length).toBe(MP4.length);
     expect(out.toString("latin1")).not.toMatch(/udta|meta|\+35\.68|ISO6709/);
     expect(out.indexOf("mdat")).toBe(MP4.indexOf("mdat"));
     expect(out.toString("latin1", 4, 8)).toBe("ftyp");
-    // 壊れた箱の大きさでも止まる（無限ループや範囲外の書き込みをしない）
+    // 壊れた箱の大きさは、無限ループや範囲外の書き込みをせずに断る
     const broken = Buffer.from(MP4);
     broken.writeUInt32BE(0xffffff, 0);
-    expect(() => stripMp4Metadata(broken)).not.toThrow();
+    expect(() => stripMp4Metadata(broken)).toThrow();
   });
 
   it("ファイル名はパスや危ない文字を除き、拡張子は中身の種類に合わせる", () => {

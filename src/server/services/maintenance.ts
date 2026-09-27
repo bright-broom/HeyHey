@@ -116,8 +116,8 @@ export async function runDailyMaintenance(db: Db, now = new Date()): Promise<Mai
     rateLimits: (await db.delete(rateLimits).where(lt(rateLimits.windowStartedAt, new Date(now.getTime() - DAY))).returning({ key: rateLimits.key })).length,
     // 送信記録には宛先（メールアドレス）が残るので、30 日で消す
     mails: (await db.delete(mailOutbox).where(lt(mailOutbox.createdAt, cutoff)).returning({ id: mailOutbox.id })).length,
-    // 上げたまま投稿されなかった動画・ファイル（一時置き場）は 1 日で消す
-    staging: await purgeStaleStaging(new Date(now.getTime() - DAY)).catch(() => 0),
+    // 上げたまま投稿されなかった動画・ファイル（一時置き場）は 2 時間で消す
+    staging: await purgeStaleStaging(new Date(now.getTime() - 2 * 60 * 60 * 1000)).catch(() => 0),
   };
 
   // 画像ファイルは DB から消し終えてから消す（ファイルだけ消えて行が残る、を避ける）

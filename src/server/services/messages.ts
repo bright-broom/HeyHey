@@ -30,7 +30,7 @@ const involves = (viewerId: string) => or(eq(conversations.userA, viewerId), eq(
 
 /** 相手として見せてよいか：本人以外で、会員か退会済みで、ブロック関係にない */
 async function partnerFor(db: Db, viewer: Viewer, otherId: string) {
-  if (!z.uuid().safeParse(otherId).success || otherId === viewer.id) return null;
+  if (!z.uuid().safeParse(otherId).success || otherId.toLowerCase() === viewer.id) return null;
   const [u] = await db
     .select({ id: users.id, displayName: users.displayName, status: users.status, termsAcceptedAt: users.termsAcceptedAt, avatarMediaId: profiles.avatarMediaId })
     .from(users)
@@ -54,8 +54,10 @@ async function findConversation(db: Db, a: string, b: string) {
   return c ?? null;
 }
 
-export async function sendMessage(db: Db, viewer: Viewer, otherId: string, raw: string): Promise<{ id: string }> {
+export async function sendMessage(db: Db, viewer: Viewer, rawOtherId: string, raw: string): Promise<{ id: string }> {
   assertMember(viewer);
+  // 並び順（user_a < user_b）と本人判定を JS と DB でそろえるため、小文字にそろえる
+  const otherId = rawOtherId.toLowerCase();
   const partner = await partnerFor(db, viewer, otherId);
   if (!partner || !partner.canReceive) throw notFound("この相手にはメッセージを送れません。");
   const parsed = bodySchema.safeParse(raw);
@@ -145,8 +147,9 @@ export type MessageDTO = { id: string; body: string; mine: boolean; deleted: boo
  * 相手とのやりとりを開く（開いたら既読にする）。まだやりとりがなければ空で返す。
  * 相手として見せられない（ブロック関係・停止中・会員でない）なら null。
  */
-export async function openConversation(db: Db, viewer: Viewer, otherId: string, opts: { before?: Date | null } = {}) {
+export async function openConversation(db: Db, viewer: Viewer, rawOtherId: string, opts: { before?: Date | null } = {}) {
   assertMember(viewer);
+  const otherId = rawOtherId.toLowerCase();
   const partner = await partnerFor(db, viewer, otherId);
   if (!partner) return null;
   const c = await findConversation(db, viewer.id, otherId);

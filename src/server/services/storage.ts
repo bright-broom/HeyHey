@@ -95,14 +95,18 @@ export async function removeStoredFile(key: string): Promise<void> {
   await fs.rm(diskPath(key), { force: true });
 }
 
-/** 一時置き場に olderThan より前から残っているファイルを消す（投稿されなかったアップロード）。消した数を返す */
-export async function purgeStaleStaging(olderThan: Date): Promise<number> {
+/**
+ * 一時置き場に olderThan より前から残っているファイルを消す（投稿されなかったアップロード）。消した数を返す。
+ * userId を渡すと、その人の一時置き場だけ
+ */
+export async function purgeStaleStaging(olderThan: Date, userId?: string): Promise<number> {
   let n = 0;
+  if (userId && !/^[0-9a-f-]{36}$/.test(userId)) return 0;
   if (useBlob()) {
     const { list, del } = await import("@vercel/blob");
     let cursor: string | undefined;
     do {
-      const page = await list({ prefix: "media/staging/", cursor, limit: 1000 });
+      const page = await list({ prefix: `media/staging/${userId ? `${userId}/` : ""}`, cursor, limit: 1000 });
       const stale = page.blobs.filter((b) => b.uploadedAt < olderThan).map((b) => b.pathname);
       if (stale.length) await del(stale);
       n += stale.length;
@@ -111,7 +115,7 @@ export async function purgeStaleStaging(olderThan: Date): Promise<number> {
     return n;
   }
   const root = path.join(/*turbopackIgnore: true*/ uploadDir(), "staging");
-  const dirs = await fs.readdir(root).catch(() => [] as string[]);
+  const dirs = userId ? [userId] : await fs.readdir(root).catch(() => [] as string[]);
   for (const d of dirs) {
     for (const f of await fs.readdir(path.join(/*turbopackIgnore: true*/ root, d)).catch(() => [] as string[])) {
       const p = path.join(/*turbopackIgnore: true*/ root, d, f);
@@ -123,4 +127,14 @@ export async function purgeStaleStaging(olderThan: Date): Promise<number> {
     }
   }
   return n;
+}
+
+/** その人の一時置き場に、いまいくつ残っているか */
+export async function countStaging(userId: string): Promise<number> {
+  if (!/^[0-9a-f-]{36}$/.test(userId)) return 0;
+  if (useBlob()) {
+    const { list } = await import("@vercel/blob");
+    return (await list({ prefix: `media/staging/${userId}/`, limit: 100 })).blobs.length;
+  }
+  return (await fs.readdir(path.join(/*turbopackIgnore: true*/ uploadDir(), "staging", userId)).catch(() => [] as string[])).length;
 }
