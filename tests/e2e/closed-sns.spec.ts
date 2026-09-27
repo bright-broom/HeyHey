@@ -215,6 +215,56 @@ test("「友達のみ」の投稿は友達以外に見えない。コメント�
   await expect(ownerPage.getByText("新人さん さんがあなたをメンションしました")).toBeVisible();
 });
 
+test("投稿の検索・1 対 1 メッセージ・イベントの出欠・ファイル添付", async () => {
+  const p = newbiePage;
+  // 検索：自分の投稿は見つかり、友達でない人には「友達のみ」の投稿は見つからない
+  await p.goto(`/search?q=${encodeURIComponent("お世話に")}`);
+  await expect(p.getByTestId("post").filter({ hasText: "お世話になります" })).toBeVisible();
+  await ownerPage.goto(`/search?q=${encodeURIComponent("友達だけに")}`);
+  await expect(ownerPage.getByText("を含む投稿は見つかりませんでした")).toBeVisible();
+
+  // メッセージ：プロフィールから送り、相手の一覧に届き、開いて読める
+  await p.goto("/");
+  await p.getByTestId("post").filter({ hasText: "オーナーからのお知らせ" }).getByRole("link", { name: "オーナー" }).first().click();
+  await expect(p).toHaveURL(/\/u\//);
+  const ownerId = p.url().split("/u/")[1]!;
+  await p.goto(`/messages/${ownerId}`);
+  await p.getByLabel("送るメッセージ").fill("はじめまして。よろしくお願いします。");
+  await p.getByRole("button", { name: "送る", exact: true }).click();
+  await expect(p.getByTestId("message").filter({ hasText: "はじめまして" })).toBeVisible();
+  await ownerPage.goto("/messages");
+  const convo = ownerPage.getByTestId("conversation").filter({ hasText: "新人さん" });
+  await expect(convo).toContainText("はじめまして");
+  await convo.click();
+  await expect(ownerPage.getByTestId("message").filter({ hasText: "はじめまして" })).toBeVisible();
+
+  // イベント：オーナーが作り、新人が参加すると、オーナーに知らせが届く
+  await ownerPage.goto("/events/new");
+  await ownerPage.getByLabel("タイトル").fill("新人歓迎会");
+  await ownerPage.getByLabel("場所（任意）").fill("本社 3F");
+  await ownerPage.getByRole("button", { name: "作る" }).click();
+  await expect(ownerPage.getByRole("heading", { name: "新人歓迎会" })).toBeVisible();
+  await p.goto("/events");
+  await p.getByTestId("event").filter({ hasText: "新人歓迎会" }).click();
+  await p.getByRole("button", { name: "参加", exact: true }).click();
+  await expect(p.getByTestId("attendee").filter({ hasText: "新人さん" })).toBeVisible();
+  await ownerPage.goto("/notifications");
+  await expect(ownerPage.getByText("新人さん さんが、イベント「新人歓迎会」に参加します")).toBeVisible();
+
+  // ファイル添付：一時置き場に上げてから投稿し、ダウンロードとして配信される
+  await p.goto("/");
+  const form = p.getByRole("form", { name: "投稿する" });
+  await form.getByLabel("本文").fill("資料を共有します");
+  await form.getByLabel("動画・ファイルを添付").setInputFiles({ name: "議事録.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%%EOF\n") });
+  await expect(form.getByRole("list", { name: "添付" })).toContainText("MB");
+  await form.getByRole("button", { name: "投稿する" }).click();
+  const link = p.getByTestId("post").filter({ hasText: "資料を共有します" }).getByRole("link", { name: /議事録\.pdf/ });
+  await expect(link).toBeVisible();
+  const res = await p.request.get((await link.getAttribute("href"))!);
+  expect(res.status()).toBe(200);
+  expect(res.headers()["content-disposition"]).toContain("attachment");
+});
+
 test("承認制のグループ：投稿はメンバーにだけ見え、承認されると見えるようになる", async () => {
   await ownerPage.goto("/groups/new");
   await ownerPage.getByLabel("グループ名").fill("E2E 写真部");

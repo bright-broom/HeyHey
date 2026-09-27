@@ -21,7 +21,7 @@ export function MessageForm({ to }: { to: string }) {
         maxLength={2000}
         required
         defaultValue={state?.fields?.body}
-        aria-label="メッセージ"
+        aria-label="送るメッセージ"
         placeholder="メッセージを書く（⌘ / Ctrl + Enter で送信）"
         className="block w-full resize-y border-0 bg-transparent px-4 pt-4 text-[15px] leading-relaxed outline-none placeholder:text-muted/80"
         onKeyDown={(e) => {

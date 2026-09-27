@@ -7,6 +7,7 @@ export const metadata: Metadata = {
   description: "招待制のメンバー限定コミュニティ",
   robots: { index: false, follow: false, nocache: true, googleBot: { index: false, follow: false } },
   referrer: "no-referrer",
+  appleWebApp: { capable: true, title: "Kakomi", statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#2e5b86" };
