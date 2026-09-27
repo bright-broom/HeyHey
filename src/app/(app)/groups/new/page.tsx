@@ -8,7 +8,7 @@ export default async function NewGroupPage() {
   await requireMember();
   return (
     <div className="max-w-xl">
-      <PageTitle plaque="NEW GROUP" title="グループを作る" lead="あなたがオーナーになります。モデレーターを任命して、参加の承認を分担できます。" />
+      <PageTitle plaque="NEW GROUP" title="グループを作る" lead="あなたが管理人になります。参加の承認やメンバーの整理は管理人が行います。" />
       <GroupForm />
     </div>
   );

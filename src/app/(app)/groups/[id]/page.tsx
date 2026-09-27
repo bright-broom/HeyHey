@@ -27,7 +27,7 @@ function Op({ groupId, op, label, userId, className = "btn-link text-xs" }: { gr
   );
 }
 
-const ROLE_LABEL = { owner: "オーナー", moderator: "モデレーター", member: "" } as const;
+const ROLE_LABEL = { owner: "管理人", moderator: "", member: "" } as const;
 
 export default async function GroupPage(props: PageProps<"/groups/[id]">) {
   const viewer = await requireMember();
@@ -139,16 +139,14 @@ export default async function GroupPage(props: PageProps<"/groups/[id]">) {
                   </div>
                   {group.adminView && !group.isOwner && m.role !== "owner" && (
                     <div className="mt-1 pl-10">
-                      <Op groupId={group.id} op="assign_owner" userId={m.id} label="オーナーに指定（サイト管理者）" />
+                      <Op groupId={group.id} op="assign_owner" userId={m.id} label="管理人に指定（サイト管理者）" />
                     </div>
                   )}
                   {group.canManage && m.id !== viewer.id && m.role !== "owner" && (
                     <details className="mt-1 pl-10 text-xs text-muted">
                       <summary className="cursor-pointer list-none hover:text-ink">管理</summary>
                       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2">
-                        {group.isOwner && m.role === "member" && <Op groupId={group.id} op="moderator" userId={m.id} label="モデレーターにする" />}
-                        {group.isOwner && m.role === "moderator" && <Op groupId={group.id} op="member" userId={m.id} label="モデレーターを解く" />}
-                        {group.isOwner && <Op groupId={group.id} op="transfer" userId={m.id} label="オーナーを移す" />}
+                        {group.isOwner && <Op groupId={group.id} op="transfer" userId={m.id} label="管理人を移す" />}
                         {(group.isOwner || m.role === "member") && <Op groupId={group.id} op="remove" userId={m.id} label="グループから外す" className="btn-link text-xs text-danger" />}
                       </div>
                     </details>

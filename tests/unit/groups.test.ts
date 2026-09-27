@@ -15,7 +15,6 @@ import {
   removeMember,
   respondJoinRequest,
   setGroupArchived,
-  setMemberRole,
   transferGroupOwnership,
   unbanMember,
   updateGroup,
@@ -150,27 +149,24 @@ describe("グループの投稿は、アクティブなメンバーにだけ見�
 });
 
 describe("参加のしかた", () => {
-  it("承認制：申請は管理役に通知され、承認されるまで何も見えない。承認で見えるようになる", async () => {
+  it("承認制：申請は管理人にだけ通知され、承認されるまで何も見えない。メンバーは承認できない", async () => {
     const owner = await makeUser(d);
-    const mod = await makeUser(d);
+    const member = await makeUser(d);
     const applicant = await makeUser(d);
     const { id: gid } = await newGroup(owner, "approval");
-    await joinGroup(d, mod.viewer, gid);
-    await respondJoinRequest(d, owner.viewer, gid, mod.user.id, true);
-    await setMemberRole(d, owner.viewer, gid, mod.user.id, "moderator");
+    await joinGroup(d, member.viewer, gid);
+    await respondJoinRequest(d, owner.viewer, gid, member.user.id, true);
     const { id } = await createPost(d, owner.viewer, { body: "x", visibility: "members", groupId: gid });
 
     expect(await joinGroup(d, applicant.viewer, gid)).toBe("requested");
     expect(await getPost(d, applicant.viewer, id)).toBeNull();
-    for (const m of [owner, mod]) {
-      const toManager = await d
-        .select()
-        .from(notifications)
-        .where(and(eq(notifications.userId, m.user.id), eq(notifications.type, "group_join_request"), eq(notifications.actorId, applicant.user.id)));
-      expect(toManager).toHaveLength(1);
-    }
+    const notified = async (userId: string) =>
+      (await d.select().from(notifications).where(and(eq(notifications.userId, userId), eq(notifications.type, "group_join_request"), eq(notifications.actorId, applicant.user.id)))).length;
+    expect(await notified(owner.user.id)).toBe(1);
+    expect(await notified(member.user.id)).toBe(0);
     await expect(respondJoinRequest(d, applicant.viewer, gid, applicant.user.id, true)).rejects.toMatchObject({ code: "forbidden" });
-    await respondJoinRequest(d, mod.viewer, gid, applicant.user.id, true);
+    await expect(respondJoinRequest(d, member.viewer, gid, applicant.user.id, true)).rejects.toMatchObject({ code: "forbidden" });
+    await respondJoinRequest(d, owner.viewer, gid, applicant.user.id, true);
     expect(await getPost(d, applicant.viewer, id)).not.toBeNull();
     expect(await d.select().from(notifications).where(and(eq(notifications.userId, applicant.user.id), eq(notifications.type, "group_join_approved")))).toHaveLength(1);
   });
@@ -190,28 +186,24 @@ describe("参加のしかた", () => {
 });
 
 describe("グループの管理", () => {
-  it("役割の境界：オーナーは外せない・退出できない。モデレーターは他のモデレーターを外せない。任命と移譲はオーナーだけ", async () => {
+  it("役割は管理人とメンバーの 2 つ：管理人は外せない・退出できない。外す・移すのは管理人だけ。移すと元の管理人はメンバーになる", async () => {
     const owner = await makeUser(d);
     const m1 = await makeUser(d);
     const m2 = await makeUser(d);
     const plain = await makeUser(d);
     const { id: gid } = await newGroup(owner);
     for (const u of [m1, m2, plain]) await joinGroup(d, u.viewer, gid);
-    await setMemberRole(d, owner.viewer, gid, m1.user.id, "moderator");
-    await setMemberRole(d, owner.viewer, gid, m2.user.id, "moderator");
 
     await expect(leaveGroup(d, owner.viewer, gid)).rejects.toMatchObject({ code: "conflict" });
     await expect(removeMember(d, m1.viewer, gid, owner.user.id)).rejects.toMatchObject({ code: "forbidden" });
-    await expect(removeMember(d, m1.viewer, gid, m2.user.id)).rejects.toMatchObject({ code: "forbidden" });
-    await expect(setMemberRole(d, m1.viewer, gid, plain.user.id, "moderator")).rejects.toMatchObject({ code: "forbidden" });
+    await expect(removeMember(d, m1.viewer, gid, plain.user.id)).rejects.toMatchObject({ code: "forbidden" });
     await expect(transferGroupOwnership(d, m1.viewer, gid, m1.user.id)).rejects.toMatchObject({ code: "forbidden" });
-    await expect(removeMember(d, plain.viewer, gid, m1.user.id)).rejects.toMatchObject({ code: "forbidden" });
-    await removeMember(d, m1.viewer, gid, plain.user.id);
+    await removeMember(d, owner.viewer, gid, plain.user.id);
 
     await transferGroupOwnership(d, owner.viewer, gid, m1.user.id);
     const roles = Object.fromEntries((await d.select().from(groupMembers).where(eq(groupMembers.groupId, gid))).map((r) => [r.userId, r.role]));
     expect(roles[m1.user.id]).toBe("owner");
-    expect(roles[owner.user.id]).toBe("moderator");
+    expect(roles[owner.user.id]).toBe("member");
     expect(Object.values(roles).filter((r) => r === "owner")).toHaveLength(1);
     await expect(transferGroupOwnership(d, owner.viewer, gid, m2.user.id)).rejects.toMatchObject({ code: "forbidden" });
   });
@@ -269,7 +261,7 @@ describe("グループの管理", () => {
     await assignGroupOwnerByAdmin(d, admin.viewer, gid, member.user.id);
     const roles = Object.fromEntries((await d.select().from(groupMembers).where(eq(groupMembers.groupId, gid))).map((r) => [r.userId, r.role]));
     expect(roles[member.user.id]).toBe("owner");
-    expect(roles[owner.user.id]).toBe("moderator");
+    expect(roles[owner.user.id]).toBe("member");
     await setGroupArchived(d, admin.viewer, gid, false);
     expect((await getGroup(d, member.viewer, gid)).isOwner).toBe(true);
   });
@@ -292,9 +284,8 @@ describe("グループの管理", () => {
     const { id: gid } = await newGroup(owner);
     await joinGroup(d, m1.viewer, gid);
     await transferGroupOwnership(d, owner.viewer, gid, m1.user.id);
-    // 移譲の直後に、古い情報のまま元オーナー（いまはモデレーター）が新オーナーを外そうとしても外れない
+    // 移譲の直後に、古い情報のまま元の管理人（いまはメンバー）が新しい管理人を外そうとしても外れない
     await expect(removeMember(d, owner.viewer, gid, m1.user.id)).rejects.toMatchObject({ code: "forbidden" });
-    await expect(setMemberRole(d, owner.viewer, gid, m1.user.id, "member")).rejects.toMatchObject({ code: "forbidden" });
     expect(Object.fromEntries((await d.select().from(groupMembers).where(eq(groupMembers.groupId, gid))).map((r) => [r.userId, r.role]))[m1.user.id]).toBe("owner");
   });
 });

@@ -12,7 +12,6 @@ import {
   removeMember,
   respondJoinRequest,
   setGroupArchived,
-  setMemberRole,
   transferGroupOwnership,
   unbanMember,
   updateGroup,
@@ -80,14 +79,9 @@ export async function groupAction(fd: FormData) {
         await removeMember(db, viewer!, groupId, userId);
         message = "メンバーを外しました。";
         break;
-      case "moderator":
-      case "member":
-        await setMemberRole(db, viewer!, groupId, userId, op);
-        message = op === "moderator" ? "モデレーターに任命しました。" : "モデレーターを解きました。";
-        break;
       case "transfer":
         await transferGroupOwnership(db, viewer!, groupId, userId);
-        message = "オーナーを移しました。";
+        message = "管理人を移しました。";
         break;
       case "unban":
         await unbanMember(db, viewer!, groupId, userId);
@@ -95,7 +89,7 @@ export async function groupAction(fd: FormData) {
         break;
       case "assign_owner":
         await assignGroupOwnerByAdmin(db, viewer!, groupId, userId);
-        message = "オーナーを指定しました。";
+        message = "管理人を指定しました。";
         break;
       case "archive":
       case "unarchive":

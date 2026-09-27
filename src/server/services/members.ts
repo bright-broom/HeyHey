@@ -137,7 +137,7 @@ export async function withdraw(db: Db, viewer: Viewer, input: { password: string
   await db.transaction(async (tx) => {
     // グループのオーナーなら、先に移してもらう（閉じたグループも。確認はこのトランザクションの中で）
     const owned = await ownedGroups(tx, viewer.id);
-    if (owned.length) throw invalid(`グループ「${owned.join("」「")}」のオーナーです。先にほかのメンバーへオーナーを移してください（閉じたグループは、再開してから移せます）。`);
+    if (owned.length) throw invalid(`グループ「${owned.join("」「")}」の管理人です。先にほかのメンバーへ管理人を移してください（閉じたグループは、再開してから移せます）。`);
     const now = new Date();
     if (input.mode === "delete") {
       await tx.update(posts).set({ deletedAt: now }).where(eq(posts.authorId, viewer.id));
