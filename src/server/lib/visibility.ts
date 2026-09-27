@@ -1,5 +1,5 @@
 import { and, eq, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
-import { comments, posts } from "../db/schema";
+import { comments, events, posts } from "../db/schema";
 
 /**
  * 公開範囲の判定を SQL の条件式として 1 か所に定義する。
@@ -30,7 +30,7 @@ export function blockedBetween(a: SQL | string, b: SQL | string): SQL {
 }
 
 /** a がそのグループのアクティブなメンバーで、グループが閉じられていないか */
-export function activeInOpenGroup(a: SQL | string, groupIdCol: SQL | typeof posts.groupId): SQL {
+export function activeInOpenGroup(a: SQL | string, groupIdCol: SQL | typeof posts.groupId | typeof events.groupId): SQL {
   return sql`EXISTS (
     SELECT 1 FROM group_members gm JOIN groups g ON g.id = gm.group_id
     WHERE gm.group_id = ${groupIdCol} AND gm.user_id = ${a} AND gm.status = 'active' AND g.archived_at IS NULL
@@ -38,7 +38,7 @@ export function activeInOpenGroup(a: SQL | string, groupIdCol: SQL | typeof post
 }
 
 /** 投稿者が「表示してよい状態」か。停止中の会員の投稿は隠し、退会（匿名化）済みは残す */
-function authorIsShowable(authorIdCol: SQL | typeof posts.authorId | typeof comments.authorId): SQL {
+function authorIsShowable(authorIdCol: SQL | typeof posts.authorId | typeof comments.authorId | typeof events.creatorId): SQL {
   return sql`EXISTS (SELECT 1 FROM users au WHERE au.id = ${authorIdCol} AND au.status IN ('active', 'withdrawn'))`;
 }
 
@@ -86,5 +86,21 @@ export function visibleComment(viewerId: string | SQL): SQL {
           AND EXISTS (SELECT 1 FROM users pau WHERE pau.id = pc.author_id AND pau.status IN ('active', 'withdrawn'))
           AND NOT ${blockedBetween(viewerId, sql`pc.author_id`)}))
     ))`,
+  )!;
+}
+
+/**
+ * イベント（F-17）の見える範囲。投稿と同じ考え方：
+ * 全会員向けは会員なら誰でも、グループのイベントはそのグループのアクティブなメンバーだけ。
+ * 作った人とブロック関係なら見えない。非表示は作った人にだけ見える。中止したイベントは見える（中止を伝えるため）。
+ */
+export function visibleEvent(viewerId: string | SQL): SQL {
+  return and(
+    isNull(events.deletedAt),
+    or(isNull(events.groupId), activeInOpenGroup(viewerId, events.groupId)),
+    or(
+      eq(events.creatorId, viewerId),
+      and(isNull(events.hiddenAt), authorIsShowable(events.creatorId), sql`NOT ${blockedBetween(viewerId, sql`${events.creatorId}`)}`),
+    ),
   )!;
 }

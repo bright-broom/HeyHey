@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Db } from "../db/client";
-import { applications, comments, conversations, friendships, invitations, media, messages, posts, profiles, reactions, reports, userMfa, users } from "../db/schema";
+import { applications, comments, conversations, eventRsvps, events, friendships, invitations, media, messages, posts, profiles, reactions, reports, userMfa, users } from "../db/schema";
 import { AppError } from "../lib/errors";
 import { assertMember } from "../lib/policy";
 import { blockedBetween } from "../lib/visibility";
@@ -101,6 +101,14 @@ export async function exportMyData(db: Db, viewer: Viewer) {
     .where(eq(messages.senderId, id))
     .orderBy(asc(messages.createdAt));
 
+  const [myEvents, myRsvps] = await Promise.all([
+    db
+      .select({ id: events.id, title: events.title, description: events.description, location: events.location, startsAt: events.startsAt, endsAt: events.endsAt, groupId: events.groupId, canceledAt: events.canceledAt, createdAt: events.createdAt })
+      .from(events)
+      .where(and(eq(events.creatorId, id), isNull(events.deletedAt))),
+    db.select({ eventId: eventRsvps.eventId, status: eventRsvps.status, updatedAt: eventRsvps.updatedAt }).from(eventRsvps).where(eq(eventRsvps.userId, id)),
+  ]);
+
   await audit(db, { actorId: id, action: "user.export", targetType: "user", targetId: id });
   return {
     format: "kakomi-export/1",
@@ -122,6 +130,8 @@ export async function exportMyData(db: Db, viewer: Viewer) {
     invitations: myInvitations,
     media: myMedia.map((m) => ({ ...m, url: `/api/media/${m.id}` })),
     messagesSent: myMessages,
+    events: myEvents,
+    eventResponses: myRsvps,
     reportsFiled: myReports,
   };
 }

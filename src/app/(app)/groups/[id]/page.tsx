@@ -8,7 +8,9 @@ import { PostCard } from "@/components/PostCard";
 import { getDb } from "@/server/db/client";
 import { AppError } from "@/server/lib/errors";
 import { getGroup, listGroupBans, listGroupMembers } from "@/server/services/groups";
+import { listEvents } from "@/server/services/events";
 import { listFeed } from "@/server/services/posts";
+import { EventRow } from "../../events/EventRow";
 import { requireMember } from "@/server/web/session";
 import { GroupForm } from "../GroupForm";
 
@@ -39,10 +41,11 @@ export default async function GroupPage(props: PageProps<"/groups/[id]">) {
   const active = group.me?.status === "active";
   const sp = await props.searchParams;
   const before = typeof sp.before === "string" ? new Date(sp.before) : null;
-  const [feed, members, bans] = await Promise.all([
+  const [feed, members, bans, upcoming] = await Promise.all([
     active ? listFeed(db, viewer, { groupId: group.id, before }) : null,
     active || group.adminView ? listGroupMembers(db, viewer, group.id) : null,
     group.canManage ? listGroupBans(db, viewer, group.id) : null,
+    active && !before ? listEvents(db, viewer, { groupId: group.id }) : null,
   ]);
 
   return (
@@ -69,6 +72,23 @@ export default async function GroupPage(props: PageProps<"/groups/[id]">) {
         </header>
 
         {!active && <p className="border-y border-line py-16 text-center text-sm text-muted">投稿はグループのメンバーにだけ表示されます。</p>}
+        {group.canPost && upcoming && (
+          <section className="mb-10" aria-labelledby="group-events">
+            <div className="flex items-baseline justify-between gap-4">
+              <h2 id="group-events" className="h2">これからのイベント</h2>
+              <Link href={`/events/new?group=${group.id}`} className="btn-link text-xs">
+                イベントを作る
+              </Link>
+            </div>
+            {upcoming.length > 0 && (
+              <ul className="mt-3 divide-y divide-line border-y border-line">
+                {upcoming.slice(0, 3).map((e) => (
+                  <EventRow key={e.id} e={e} />
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
         {group.canPost && (
           <div className="mb-12">
             <Composer name={viewer.displayName} viewerId={viewer.id} uploadMode={blobEnabled() ? "blob" : "disk"} groupId={group.id} groupName={group.name} />

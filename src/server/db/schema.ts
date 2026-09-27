@@ -506,6 +506,52 @@ export const mailOutbox = pgTable("mail_outbox", {
   createdAt: createdAt(),
 });
 
+// ───────── イベント（F-17） ─────────
+
+export const rsvpStatus = pgEnum("rsvp_status", ["going", "maybe", "declined"]);
+
+/**
+ * イベント。見える範囲は投稿と同じ考え方：group_id がなければ全会員、あればそのグループのメンバーだけ。
+ * 中止しても残す（出欠を付けた人に中止を伝えるため）。削除は論理削除。
+ */
+export const events = pgTable(
+  "events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => users.id),
+    groupId: uuid("group_id").references(() => groups.id),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    location: text("location").notNull().default(""),
+    startsAt: ts("starts_at").notNull(),
+    endsAt: ts("ends_at"),
+    canceledAt: ts("canceled_at"),
+    /** 管理者による非表示（作った人にだけ「非表示中」として見える） */
+    hiddenAt: ts("hidden_at"),
+    deletedAt: ts("deleted_at"),
+    createdAt: createdAt(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+  },
+  (t) => [index("events_starts_idx").on(t.startsAt), index("events_group_idx").on(t.groupId, t.startsAt)],
+);
+
+export const eventRsvps = pgTable(
+  "event_rsvps",
+  {
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    status: rsvpStatus("status").notNull(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.eventId, t.userId] })],
+);
+
 // ───────── 1 対 1 メッセージ（F-16） ─────────
 
 /**

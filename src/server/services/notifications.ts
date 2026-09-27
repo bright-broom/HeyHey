@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
-import { blockedBetween, visibleComment, visiblePost } from "../lib/visibility";
+import { blockedBetween, visibleComment, visibleEvent, visiblePost } from "../lib/visibility";
 import type { Db, DbOrTx } from "../db/client";
 import { notifications, posts, users } from "../db/schema";
 import { assertMember } from "../lib/policy";
@@ -20,7 +20,9 @@ export type NotificationType =
   | "ownership_transferred"
   | "group_join_request"
   | "group_join_approved"
-  | "message";
+  | "message"
+  | "event_rsvp"
+  | "event_canceled";
 
 /** 運営の通知（審査・通報）。管理者個人のブロック・ミュートでは止めない */
 export const OPS_NOTIFICATION_TYPES: NotificationType[] = ["application_submitted", "application_overdue", "report_submitted", "ownership_transferred", "moderation", "report_resolved"];
@@ -76,6 +78,8 @@ export async function notifyAdmins(
 export function stillVisible(viewerId: string) {
   return and(
     or(isNull(notifications.postId), sql`EXISTS (SELECT 1 FROM posts WHERE posts.id = ${notifications.postId} AND ${visiblePost(viewerId)})`),
+    // イベントを指す通知は、そのイベントがいま見える場合だけ
+    sql`(${notifications.data}->>'eventId' IS NULL OR EXISTS (SELECT 1 FROM events WHERE events.id::text = ${notifications.data}->>'eventId' AND ${visibleEvent(viewerId)}))`,
     // コメントを指す通知（コメントでのメンション）は、そのコメントがいま見える場合だけ
     sql`(${notifications.data}->>'commentId' IS NULL OR EXISTS (SELECT 1 FROM comments WHERE comments.id::text = ${notifications.data}->>'commentId' AND ${visibleComment(viewerId)}))`,
     // 後からブロック・ミュートした相手の通知も出さない

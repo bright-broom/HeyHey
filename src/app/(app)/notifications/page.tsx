@@ -30,6 +30,10 @@ function describe(n: N): { text: string; href?: string } {
       return { text: `あなたの通報が処理されました（${d.resolution}）` };
     case "moderation":
       return { text: `あなたの${d.targetType === "comment" ? "コメント" : "投稿"}に対して管理者が対応しました（${d.resolution}）${d.note ? `：${d.note}` : ""}` };
+    case "event_rsvp":
+      return { text: `${who} さんが、イベント「${d.title ?? ""}」に参加します`, href: `/events/${d.eventId}` };
+    case "event_canceled":
+      return { text: `イベント「${d.title ?? ""}」は中止になりました`, href: `/events/${d.eventId}` };
     case "message":
       return { text: `${who} さんからメッセージが届きました`, href: `/messages/${n.actorId}` };
     case "mention":

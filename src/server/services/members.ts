@@ -1,7 +1,7 @@
 import { and, asc, eq, ilike, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "../db/client";
-import { applications, comments, friendships, groupMembers, invitations, media, messages, posts, profiles, sessions, users } from "../db/schema";
+import { applications, comments, eventRsvps, events, friendships, groupMembers, invitations, media, messages, posts, profiles, sessions, users } from "../db/schema";
 import { forbidden, invalid } from "../lib/errors";
 import { verifyPassword } from "../lib/password";
 import { assertMember } from "../lib/policy";
@@ -144,6 +144,7 @@ export async function withdraw(db: Db, viewer: Viewer, input: { password: string
       await tx.update(comments).set({ deletedAt: now }).where(eq(comments.authorId, viewer.id));
       // メッセージは本文ごと消す（相手の画面には「削除されたメッセージ」と出る）
       await tx.update(messages).set({ deletedAt: now, body: "" }).where(eq(messages.senderId, viewer.id));
+      await tx.update(events).set({ deletedAt: now }).where(eq(events.creatorId, viewer.id));
       const postImages = await tx
         .delete(media)
         .where(and(eq(media.ownerId, viewer.id), eq(media.kind, "post")))
@@ -155,6 +156,7 @@ export async function withdraw(db: Db, viewer: Viewer, input: { password: string
     await tx.update(profiles).set({ bio: "", affiliation: "", avatarMediaId: null }).where(eq(profiles.userId, viewer.id));
     await tx.delete(friendships).where(or(eq(friendships.requesterId, viewer.id), eq(friendships.addresseeId, viewer.id)));
     await tx.delete(groupMembers).where(eq(groupMembers.userId, viewer.id));
+    await tx.delete(eventRsvps).where(eq(eventRsvps.userId, viewer.id));
     await tx.update(invitations).set({ revokedAt: now, revokedById: viewer.id }).where(and(eq(invitations.createdById, viewer.id), sql`${invitations.revokedAt} IS NULL`));
     await tx
       .update(applications)

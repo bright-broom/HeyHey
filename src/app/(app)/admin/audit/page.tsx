@@ -23,6 +23,8 @@ const ACTION_LABEL: Record<string, string> = {
   "comment.auto_hide": "コメントを自動非表示",
   "report.view_content": "通報内容を閲覧",
   "report.resolve": "通報を処理",
+  "event.hide": "イベントを非表示",
+  "event.unhide": "イベントを再表示",
 };
 
 export default async function AuditPage() {
