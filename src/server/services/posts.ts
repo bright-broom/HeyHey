@@ -7,6 +7,7 @@ import { assertMember } from "../lib/policy";
 import { extractMentionIds, extractTags, maskHiddenMentions, MENTION_RE, resolveMentions, unmaskHiddenMentions } from "../../lib/richtext";
 import { activeInOpenGroup, blockedBetween, visibleComment, visiblePost } from "../lib/visibility";
 import type { Viewer } from "../lib/viewer";
+import { attachmentInput, claimAttachment, type AttachmentInput, type ProcessedAttachment } from "./attachments";
 import { MAX_IMAGES_PER_POST, processImage, removeStoredFile, type ProcessedImage } from "./media";
 import { notify } from "./notifications";
 import { consume } from "./ratelimit";
@@ -40,7 +41,8 @@ export type PostDTO = {
   hidden: boolean;
   isMine: boolean;
   author: AuthorDTO;
-  media: { id: string; width: number; height: number }[];
+  /** 画像・動画・ファイル。種類は mime で分ける（fileName は動画・ファイルだけ） */
+  media: { id: string; width: number; height: number; mime: string; fileName: string | null; bytes: number }[];
   reactions: Record<ReactionKey, number>;
   myReaction: ReactionKey | null;
   commentCount: number;
@@ -135,7 +137,7 @@ async function hydrate(db: Db, viewer: Viewer, rows: (typeof posts.$inferSelect)
   const [authors, mediaRows, reactionCounts, myReactions, commentCounts] = await Promise.all([
     loadAuthors(db, rows.map((p) => p.authorId)),
     db
-      .select({ id: media.id, postId: media.postId, width: media.width, height: media.height })
+      .select({ id: media.id, postId: media.postId, width: media.width, height: media.height, mime: media.mime, fileName: media.fileName, bytes: media.bytes })
       .from(media)
       .where(inArray(media.postId, ids))
       .orderBy(asc(media.position)),
@@ -198,7 +200,7 @@ async function hydrate(db: Db, viewer: Viewer, rows: (typeof posts.$inferSelect)
       hidden: p.hiddenAt != null,
       isMine: p.authorId === viewer.id,
       author: authors.get(p.authorId) ?? WITHDRAWN,
-      media: mediaRows.filter((m) => m.postId === p.id).map(({ id, width, height }) => ({ id, width, height })),
+      media: mediaRows.filter((m) => m.postId === p.id).map(({ postId: _, ...m }) => m),
       reactions: r,
       myReaction: myReactions.find((m) => m.postId === p.id)?.type ?? null,
       commentCount: commentCounts.find((c) => c.postId === p.id)?.n ?? 0,
@@ -209,16 +211,32 @@ async function hydrate(db: Db, viewer: Viewer, rows: (typeof posts.$inferSelect)
 
 export const FEED_PAGE_SIZE = 20;
 
-/** ホームフィード（新着順）。authorId を渡すとその人の投稿一覧（プロフィール用） */
-export async function listFeed(db: Db, viewer: Viewer, opts: { before?: Date | null; authorId?: string; tag?: string; groupId?: string } = {}) {
+/** 検索語の長さ（F-08） */
+export const SEARCH_MAX = 100;
+
+/**
+ * 全文検索の条件。本文からメンションの記法を除いてから部分一致で探す
+ * （記法には書いた時点の名前が残っているので、いま見えない相手の名前で投稿を探せないように）。
+ * 日本語は単語に区切れないので、全文索引ではなく部分一致にする（会員 1,000 人規模では十分に速い）。
+ */
+function matchesSearch(q: string) {
+  const words = q.normalize("NFKC").split(/[\s　]+/).filter(Boolean).slice(0, 5);
+  const plain = sql`normalize(regexp_replace(${posts.body}, ${MENTION_RE.source}, '', 'g'), NFKC)`;
+  return and(...words.map((w) => sql`${plain} ILIKE ${`%${w.replace(/[\\%_]/g, (c) => `\\${c}`)}%`}`))!;
+}
+
+/** ホームフィード（新着順）。authorId を渡すとその人の投稿一覧（プロフィール用）、q を渡すと検索結果 */
+export async function listFeed(db: Db, viewer: Viewer, opts: { before?: Date | null; authorId?: string; tag?: string; groupId?: string; q?: string } = {}) {
   assertMember(viewer);
   const conds = [visiblePost(viewer.id)];
+  const q = opts.q?.trim().slice(0, SEARCH_MAX);
+  if (q) conds.push(matchesSearch(q));
   if (opts.before && !Number.isNaN(opts.before.getTime())) conds.push(lt(posts.createdAt, opts.before));
   if (opts.groupId) conds.push(eq(posts.groupId, opts.groupId));
   if (opts.tag) conds.push(sql`EXISTS (SELECT 1 FROM ${postTags} WHERE ${postTags.postId} = ${posts.id} AND ${postTags.tag} = ${opts.tag})`);
   if (opts.authorId) conds.push(eq(posts.authorId, opts.authorId));
-  // ホームのフィードからは、ミュートした人の投稿を外す（プロフィールを開けば見える）
-  else conds.push(sql`NOT EXISTS (SELECT 1 FROM user_mutes um WHERE um.muter_id = ${viewer.id} AND um.muted_id = ${posts.authorId})`);
+  // ホームのフィードからは、ミュートした人の投稿を外す（プロフィールを開けば見える。検索でも見つかる）
+  else if (!q) conds.push(sql`NOT EXISTS (SELECT 1 FROM user_mutes um WHERE um.muter_id = ${viewer.id} AND um.muted_id = ${posts.authorId})`);
   const rows = await db
     .select()
     .from(posts)
@@ -299,7 +317,7 @@ async function assertWriteRate(db: Db, viewer: Viewer, kind: "post" | "comment")
 export async function createPost(
   db: Db,
   viewer: Viewer,
-  input: { body: string; visibility: string; images?: Buffer[]; groupId?: string | null },
+  input: { body: string; visibility: string; images?: Buffer[]; attachments?: AttachmentInput; groupId?: string | null },
 ): Promise<{ id: string }> {
   assertMember(viewer);
   // グループの投稿は、そのグループのアクティブなメンバーだけが書ける。公開範囲はグループのメンバー
@@ -314,13 +332,17 @@ export async function createPost(
   if (!parsed.success) throw invalid(parsed.error.issues[0]?.message ?? "入力内容を確認してください。");
   const body = parsed.data.body.trim();
   const images = input.images ?? [];
-  if (!body && images.length === 0) throw invalid("本文か画像のどちらかを入れてください。");
+  const attached = attachmentInput.safeParse(input.attachments ?? []);
+  if (!attached.success) throw invalid(attached.error.issues[0]?.message ?? "添付を確認してください。");
+  if (!body && images.length === 0 && attached.data.length === 0) throw invalid("本文か画像・動画・ファイルのどれかを入れてください。");
   if (images.length > MAX_IMAGES_PER_POST) throw invalid(`画像は ${MAX_IMAGES_PER_POST} 枚までです。`);
   await assertWriteRate(db, viewer, "post");
 
   const processed: ProcessedImage[] = [];
+  const files: ProcessedAttachment[] = [];
   try {
     for (const img of images) processed.push(await processImage(img));
+    for (const a of attached.data) files.push(await claimAttachment(viewer, a));
     return await db.transaction(async (tx) => {
       const [p] = await tx
         .insert(posts)
@@ -341,12 +363,29 @@ export async function createPost(
           })),
         );
       }
+      if (files.length) {
+        await tx.insert(media).values(
+          files.map((f, i) => ({
+            ownerId: viewer.id,
+            postId: p!.id,
+            kind: "post" as const,
+            storageKey: f.key,
+            mime: f.mime,
+            width: 0,
+            height: 0,
+            bytes: f.bytes,
+            position: processed.length + i,
+            fileName: f.fileName,
+          })),
+        );
+      }
       await saveTags(tx, p!.id, body);
       await notifyMentions(tx, viewer, p!.id, extractMentionIds(body));
       return { id: p!.id };
     });
   } catch (e) {
-    await Promise.all(processed.map((m) => removeStoredFile(m.key)));
+    // 移し終えた分は消す。まだ一時置き場にある分は残す（直して送り直せるように。残りは定期処理が 1 日で消す）
+    await Promise.all([...processed, ...files].map((m) => removeStoredFile(m.key)));
     throw e;
   }
 }

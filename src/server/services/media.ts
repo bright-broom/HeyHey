@@ -78,5 +78,5 @@ export async function mediaForViewer(db: Db, viewer: Viewer | null, mediaId: str
         : false;
     if (!p && !reportedForAdmin) return null;
   }
-  return { storageKey: m.storageKey, mime: m.mime, bytes: m.bytes };
+  return { storageKey: m.storageKey, mime: m.mime, bytes: m.bytes, fileName: m.fileName };
 }

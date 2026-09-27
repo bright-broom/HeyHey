@@ -1,7 +1,9 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useCallback, useEffect, useRef, useState } from "react";
 import { createPostAction } from "@/app/actions/content";
+import { MAX_UPLOAD_TOTAL, shrinkImage } from "@/lib/shrink-image";
+import { AttachmentPicker, type UploadMode } from "./AttachmentPicker";
 import { FormMessage } from "./FormMessage";
 import { MentionField } from "./MentionField";
 import { SubmitButton } from "./SubmitButton";
@@ -11,30 +13,60 @@ const MAX_FILES = 4;
 const MAX_BYTES = 8 * 1024 * 1024;
 
 /** 光の当たった一枚の面。書く場所だけを置き、道具は下の一列にまとめる */
-export function Composer({ name, groupId, groupName }: { name: string; groupId?: string; groupName?: string }) {
+export function Composer({
+  name,
+  viewerId,
+  uploadMode,
+  groupId,
+  groupName,
+}: {
+  name: string;
+  viewerId: string;
+  uploadMode: UploadMode;
+  groupId?: string;
+  groupName?: string;
+}) {
   const [state, action] = useActionState(createPostAction, undefined);
   const formRef = useRef<HTMLFormElement>(null);
   const [previews, setPreviews] = useState<string[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [preparing, setPreparing] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [posted, setPosted] = useState(0);
+  const onBusy = useCallback((b: boolean) => setUploading(b), []);
 
   // React 19 は送信後にフォームを自動リセットする（選んだ画像も外れる）ので、プレビューも合わせて消す
   useEffect(() => {
     if (state) setPreviews([]);
-    if (state?.ok) formRef.current?.reset();
+    if (state?.ok) {
+      formRef.current?.reset();
+      setPosted((n) => n + 1);
+    }
   }, [state]);
   useEffect(() => () => previews.forEach((u) => URL.revokeObjectURL(u)), [previews]);
 
-  function onFiles(e: React.ChangeEvent<HTMLInputElement>) {
-    const list = Array.from(e.target.files ?? []);
+  async function onFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const input = e.target;
+    const list = Array.from(input.files ?? []);
     setFileError(null);
     const reject = (msg: string) => {
       setFileError(msg);
-      e.target.value = "";
+      input.value = "";
       setPreviews([]);
     };
     if (list.length > MAX_FILES) return reject(`画像は ${MAX_FILES} 枚までです。`);
     if (list.some((f) => f.size > MAX_BYTES)) return reject("画像は 1 枚 8MB までです。");
-    setPreviews(list.map((f) => URL.createObjectURL(f)));
+    // 送る前に縮める（本番は 1 回の送信が 4.5MB まで）。縮めたファイルに入れ替える
+    setPreparing(true);
+    const shrunk = await Promise.all(list.map(shrinkImage));
+    setPreparing(false);
+    if (shrunk.reduce((n, f) => n + f.size, 0) > MAX_UPLOAD_TOTAL) return reject("画像が大きすぎます。枚数を減らしてください。");
+    if (shrunk.some((f, i) => f !== list[i])) {
+      const dt = new DataTransfer();
+      shrunk.forEach((f) => dt.items.add(f));
+      input.files = dt.files;
+    }
+    setPreviews(shrunk.map((f) => URL.createObjectURL(f)));
   }
 
   return (
@@ -72,9 +104,10 @@ export function Composer({ name, groupId, groupName }: { name: string; groupId?:
           ＋ 画像{previews.length ? `（${previews.length}）` : ""}
           <input type="file" name="images" accept="image/jpeg,image/png,image/webp,image/gif" multiple className="sr-only" onChange={onFiles} />
         </label>
+        <AttachmentPicker viewerId={viewerId} mode={uploadMode} resetKey={posted} onBusy={onBusy} />
         <div className="ml-auto flex items-center gap-3">
           {groupId ? <span className="text-xs text-muted">「{groupName}」のメンバーだけに公開</span> : <VisibilityToggle />}
-          <SubmitButton className="btn-primary" pendingText="投稿中…">
+          <SubmitButton className="btn-primary" pendingText="投稿中…" disabled={preparing || uploading}>
             投稿する
           </SubmitButton>
         </div>

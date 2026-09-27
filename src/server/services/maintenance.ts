@@ -19,7 +19,7 @@ import { recordActivitySnapshot } from "./activity";
 import { audit } from "./audit";
 import { budget, dispatchPendingNotificationEmails, isDigestDay, sendWeeklyDigests } from "./email-notify";
 import { notifyAdmins } from "./notifications";
-import { removeStoredFile } from "./storage";
+import { purgeStaleStaging, removeStoredFile } from "./storage";
 
 /**
  * 毎日 1 回の定期処理（Vercel Cron → /api/cron/daily、ローカルは npm run maintenance）。
@@ -37,7 +37,7 @@ export type MaintenanceReport = {
   overdueNotified: number;
   notificationEmails: number;
   digests: number;
-  expired: { sessions: number; challenges: number; tokens: number; rateLimits: number; mails: number };
+  expired: { sessions: number; challenges: number; tokens: number; rateLimits: number; mails: number; staging: number };
 };
 
 export async function runDailyMaintenance(db: Db, now = new Date()): Promise<MaintenanceReport> {
@@ -116,6 +116,8 @@ export async function runDailyMaintenance(db: Db, now = new Date()): Promise<Mai
     rateLimits: (await db.delete(rateLimits).where(lt(rateLimits.windowStartedAt, new Date(now.getTime() - DAY))).returning({ key: rateLimits.key })).length,
     // 送信記録には宛先（メールアドレス）が残るので、30 日で消す
     mails: (await db.delete(mailOutbox).where(lt(mailOutbox.createdAt, cutoff)).returning({ id: mailOutbox.id })).length,
+    // 上げたまま投稿されなかった動画・ファイル（一時置き場）は 1 日で消す
+    staging: await purgeStaleStaging(new Date(now.getTime() - DAY)).catch(() => 0),
   };
 
   // 画像ファイルは DB から消し終えてから消す（ファイルだけ消えて行が残る、を避ける）

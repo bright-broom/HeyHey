@@ -35,6 +35,44 @@ function Menu({ children, label = "メニュー" }: { children: React.ReactNode;
   );
 }
 
+const FILE_LABEL: Record<string, string> = {
+  "application/pdf": "PDF",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "Word",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "Excel",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "PowerPoint",
+};
+const fileSize = (b: number) => (b >= 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)}MB` : `${Math.max(1, Math.round(b / 1024))}KB`);
+
+/** 画像、動画、ファイルの順に並べる */
+function Attachments({ media }: { media: PostDTO["media"] }) {
+  const images = media.filter((m) => m.mime.startsWith("image/"));
+  const videos = media.filter((m) => m.mime.startsWith("video/"));
+  const files = media.filter((m) => !m.mime.startsWith("image/") && !m.mime.startsWith("video/"));
+  return (
+    <>
+      <MediaGrid media={images} />
+      {videos.map((v) => (
+        // 字幕は本人が付けられないので、代わりにファイル名を名前として読み上げる
+        // eslint-disable-next-line jsx-a11y/media-has-caption
+        <video key={v.id} src={`/api/media/${v.id}`} controls playsInline preload="metadata" className="mt-5 max-h-[560px] w-full bg-ink" aria-label={v.fileName ?? "動画"} data-testid="post-video" />
+      ))}
+      {files.length > 0 && (
+        <ul className="mt-5 divide-y divide-line border-y border-line">
+          {files.map((f) => (
+            <li key={f.id}>
+              <a href={`/api/media/${f.id}`} download={f.fileName ?? undefined} className="flex items-center gap-3 py-3 text-sm transition-opacity hover:opacity-70">
+                <span className="w-20 shrink-0 text-xs tracking-[0.08em] text-muted">{FILE_LABEL[f.mime] ?? "ファイル"}</span>
+                <span className="min-w-0 flex-1 truncate underline decoration-line underline-offset-4">{f.fileName}</span>
+                <span className="shrink-0 text-xs tabular-nums text-muted">{fileSize(f.bytes)}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
+
 /** 画像は角を落とさず、細い目地（2px）で並べる */
 function MediaGrid({ media }: { media: PostDTO["media"] }) {
   if (!media.length) return null;
@@ -189,7 +227,7 @@ export function PostCard({ post, mode = "feed" }: { post: PostDTO; mode?: "feed"
       </header>
 
       {post.body && <RichText body={post.body} className="mt-5 whitespace-pre-wrap break-words text-[15.5px] leading-[1.95]" />}
-      <MediaGrid media={post.media} />
+      <Attachments media={post.media} />
 
       <div className="mt-6 flex items-center justify-between gap-4">
         <ReactionBar target={{ postId: post.id }} reactions={post.reactions} mine={post.myReaction} />

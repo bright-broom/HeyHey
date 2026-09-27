@@ -21,7 +21,9 @@ const securityHeaders = [
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' blob: data:",
             "font-src 'self'",
-            "connect-src 'self'",
+            // 動画・ファイルは、ブラウザから Vercel Blob（private）の一時置き場へ直接上げる
+            "connect-src 'self' https://vercel.com",
+            "media-src 'self'",
             "object-src 'none'",
             "base-uri 'self'",
             "form-action 'self'",

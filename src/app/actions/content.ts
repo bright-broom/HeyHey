@@ -28,11 +28,21 @@ async function quiet(fn: () => Promise<unknown>, okMessage?: string) {
   refresh();
 }
 
+/** 添付の一覧（隠し欄の JSON）。形が崩れていれば空として扱い、中身はサービス側で確かめる */
+function parseAttachments(raw: string): { key: string; name: string }[] {
+  try {
+    const v = JSON.parse(raw || "[]");
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function createPostAction(_: FormState, fd: FormData): Promise<FormState> {
   const { db, viewer } = await ctx();
   const images = await files(fd, "images");
   const res = await attempt(async () => {
-    await createPost(db, viewer!, { body: str(fd, "body"), visibility: str(fd, "visibility"), images, groupId: str(fd, "groupId") || null });
+    await createPost(db, viewer!, { body: str(fd, "body"), visibility: str(fd, "visibility"), images, attachments: parseAttachments(str(fd, "attachments")), groupId: str(fd, "groupId") || null });
     return "投稿しました。";
   });
   if (res?.ok) refresh();

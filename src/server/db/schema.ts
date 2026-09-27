@@ -315,6 +315,8 @@ export const media = pgTable(
     height: integer("height").notNull(),
     bytes: integer("bytes").notNull(),
     position: integer("position").notNull().default(0),
+    /** 動画・ファイルの元の名前（画像は null。表示とダウンロード名にだけ使う） */
+    fileName: text("file_name"),
     createdAt: createdAt(),
   },
   (t) => [index("media_post_idx").on(t.postId)],

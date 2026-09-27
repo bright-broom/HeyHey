@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Avatar } from "@/components/Avatar";
 import { Composer } from "@/components/Composer";
+import { blobEnabled } from "@/server/lib/env";
 import { PostCard } from "@/components/PostCard";
 import { getDb } from "@/server/db/client";
 import { listFriends } from "@/server/services/friends";
@@ -26,7 +27,7 @@ export default async function FeedPage(props: PageProps<"/">) {
   return (
     <div className="grid gap-14 lg:grid-cols-[minmax(0,640px)_240px] lg:justify-between">
       <div>
-        {!before && <Composer name={viewer.displayName} />}
+        {!before && <Composer name={viewer.displayName} viewerId={viewer.id} uploadMode={blobEnabled() ? "blob" : "disk"} />}
         <section aria-label="フィード" className={before ? "" : "mt-12"}>
           {posts.length === 0 && (
             <div className="border-t border-line py-20 text-center">

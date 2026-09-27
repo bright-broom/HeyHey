@@ -8,6 +8,7 @@ export function SubmitButton({
   pendingText,
   name,
   value,
+  disabled,
   ...rest
 }: {
   children: React.ReactNode;
@@ -18,7 +19,7 @@ export function SubmitButton({
 } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
   const { pending } = useFormStatus();
   return (
-    <button type="submit" className={className} disabled={pending} name={name} value={value} {...rest}>
+    <button type="submit" className={className} disabled={pending || disabled} name={name} value={value} {...rest}>
       {pending ? (pendingText ?? "送信中…") : children}
     </button>
   );

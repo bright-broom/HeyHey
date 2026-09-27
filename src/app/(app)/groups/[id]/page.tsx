@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { groupAction } from "@/app/actions/groups";
 import { Avatar } from "@/components/Avatar";
 import { Composer } from "@/components/Composer";
+import { blobEnabled } from "@/server/lib/env";
 import { PostCard } from "@/components/PostCard";
 import { getDb } from "@/server/db/client";
 import { AppError } from "@/server/lib/errors";
@@ -70,7 +71,7 @@ export default async function GroupPage(props: PageProps<"/groups/[id]">) {
         {!active && <p className="border-y border-line py-16 text-center text-sm text-muted">投稿はグループのメンバーにだけ表示されます。</p>}
         {group.canPost && (
           <div className="mb-12">
-            <Composer name={viewer.displayName} groupId={group.id} groupName={group.name} />
+            <Composer name={viewer.displayName} viewerId={viewer.id} uploadMode={blobEnabled() ? "blob" : "disk"} groupId={group.id} groupName={group.name} />
           </div>
         )}
         {feed && feed.posts.length === 0 && <p className="border-t border-line py-16 text-center text-sm text-muted">まだ投稿はありません。</p>}
