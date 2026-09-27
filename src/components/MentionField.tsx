@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { suggestMembersAction } from "@/app/actions/content";
+import { applyEdit, decode, encode, hasTokens, labelOf, replaceRange, type MentionSpan } from "@/lib/mention-input";
 import { mentionToken } from "@/lib/richtext";
 
 type Candidate = { id: string; displayName: string; affiliation: string | null };
@@ -25,11 +26,19 @@ function findQuery(value: string, caret: number): { start: number; q: string } |
 }
 
 /**
- * メンションできる入力欄。@ を打つと会員の候補が出て、選ぶと `@[名前](u:ID)` が入る。
+ * メンションできる入力欄。@ を打つと会員の候補が出て、選ぶと `@名前` が入る。
  * 候補は ↑↓ で選び、Enter / Tab で確定、Esc で閉じる（スクリーンリーダー向けにコンボボックスとして振る舞う）。
+ *
+ * 見える欄には `@名前` だけを出し、送るのは隠し欄の保存用の本文（`@[名前](u:ID)`）。
+ * JavaScript が動くまでは、見える欄がそのまま保存用の本文を送る（書いたものを失わない）。
+ * メンションの直後で Backspace（直前で Delete）を押すと、メンションをまとめて消す。
  */
-export function MentionField({ multiline, ...props }: FieldProps) {
+export function MentionField({ multiline, name, defaultValue, ...props }: FieldProps) {
   const ref = useRef<HTMLTextAreaElement & HTMLInputElement>(null);
+  const hiddenRef = useRef<HTMLInputElement>(null);
+  const spans = useRef<MentionSpan[]>([]);
+  const prev = useRef("");
+  const [ready, setReady] = useState(false);
   const listId = useId();
   const [query, setQuery] = useState<{ start: number; q: string } | null>(null);
   const [items, setItems] = useState<Candidate[]>([]);
@@ -52,25 +61,83 @@ export function MentionField({ multiline, ...props }: FieldProps) {
     };
   }, [query?.q, query?.start]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /** 見える欄の今の文字と範囲から、送る本文を作り直す */
+  function sync() {
+    const el = ref.current;
+    if (!el || !hiddenRef.current) return;
+    hiddenRef.current.value = encode(el.value, spans.current);
+    prev.current = el.value;
+  }
+
+  /** 見える欄に保存用の本文が入っているとき（初回・送信後のリセット・エラーで戻ったとき）に、見せる形へ直す */
+  function normalize() {
+    const el = ref.current;
+    if (!el) return;
+    const d = decode(el.value);
+    el.value = d.text;
+    spans.current = d.spans;
+    sync();
+  }
+
+  useEffect(() => {
+    normalize();
+    setReady(true);
+    const form = ref.current?.form;
+    // reset イベントは値が戻る前に届くので、戻った後で直す
+    const onReset = () => setTimeout(normalize, 0);
+    form?.addEventListener("reset", onReset);
+    return () => form?.removeEventListener("reset", onReset);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (ref.current && hasTokens(ref.current.value)) normalize();
+  }, [defaultValue]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function update() {
     const el = ref.current;
     if (!el) return;
     setQuery(findQuery(el.value, el.selectionStart ?? el.value.length));
   }
 
+  function onInput() {
+    const el = ref.current;
+    if (!el) return;
+    spans.current = applyEdit(prev.current, el.value, el.selectionEnd ?? el.value.length, spans.current);
+    sync();
+    update();
+  }
+
+  function replace(from: number, to: number, insert: string, raw?: string) {
+    const el = ref.current;
+    if (!el) return;
+    const r = replaceRange(el.value, spans.current, from, to, insert, raw);
+    el.value = r.text;
+    spans.current = r.spans;
+    el.setSelectionRange(r.caret, r.caret);
+    sync();
+  }
+
   function choose(c: Candidate) {
     const el = ref.current;
     if (!el || !query) return;
-    const caret = el.selectionStart ?? el.value.length;
-    const token = `${mentionToken(c.displayName, c.id)} `;
-    el.value = el.value.slice(0, query.start) + token + el.value.slice(caret);
-    const pos = query.start + token.length;
-    el.setSelectionRange(pos, pos);
+    const raw = mentionToken(c.displayName, c.id);
+    replace(query.start, el.selectionStart ?? el.value.length, `${labelOf(raw)} `, raw);
     el.focus();
     setQuery(null);
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
+    const el = ref.current;
+    if (!open && el && (e.key === "Backspace" || e.key === "Delete") && el.selectionStart === el.selectionEnd) {
+      const caret = el.selectionStart ?? 0;
+      const hit = spans.current.find((s) => (e.key === "Backspace" ? s.end === caret : s.start === caret));
+      if (hit) {
+        e.preventDefault();
+        replace(hit.start, hit.end, "");
+        update();
+      }
+      return;
+    }
     if (!open) return;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
@@ -87,7 +154,9 @@ export function MentionField({ multiline, ...props }: FieldProps) {
   const common = {
     ...props,
     ref,
-    onInput: update,
+    name: ready ? undefined : name,
+    defaultValue,
+    onInput,
     onClick: update,
     onKeyDown,
     onBlur: () => setTimeout(() => setQuery(null), 120),
@@ -101,6 +170,7 @@ export function MentionField({ multiline, ...props }: FieldProps) {
   return (
     <div className="relative min-w-0 flex-1">
       {multiline ? <textarea {...common} /> : <input {...common} />}
+      <input ref={hiddenRef} type="hidden" name={ready ? name : undefined} defaultValue={defaultValue} />
       <ul id={listId} role="listbox" aria-label="メンションする会員" hidden={!open} className="absolute left-0 right-0 top-full z-30 max-h-64 overflow-y-auto border border-line bg-light shadow-lg">
         {items.map((c, i) => (
           <li

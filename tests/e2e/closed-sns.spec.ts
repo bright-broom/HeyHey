@@ -186,6 +186,31 @@ test("「友達のみ」の投稿は友達以外に見えない。コメント�
   await expect(post.getByText("よろしくお願いします！")).toBeVisible();
   await ownerPage.goto("/notifications");
   await expect(ownerPage.getByText("新人さん さんがあなたの投稿にコメントしました")).toBeVisible();
+
+  // メンション：入力欄には @名前 だけが見え、投稿ではプロフィールへのリンクになり、相手に通知が届く
+  const composer = p.getByRole("form", { name: "投稿する" }).getByLabel("本文");
+  await composer.pressSequentially("お世話になります @オー");
+  await p.getByRole("option", { name: /オーナー/ }).click();
+  await expect(composer).toHaveValue("お世話になります @オーナー ");
+  await composer.pressSequentially("さん");
+  await p.getByRole("button", { name: "投稿する" }).click();
+  const mentioned = p.getByTestId("post").filter({ hasText: "お世話になります" });
+  await expect(mentioned.getByRole("link", { name: "@オーナー" })).toBeVisible();
+  await expect(mentioned).not.toContainText("](u:");
+  await expect(composer).toHaveValue("");
+  // 編集画面でも @名前 で見え、書き足して保存してもメンションは残る
+  const mentionedId = await mentioned.getAttribute("data-post-id");
+  await p.goto(`/posts/${mentionedId}/edit`);
+  const editor = p.getByLabel("本文");
+  await expect(editor).toHaveValue("お世話になります @オーナー さん");
+  await editor.press("ControlOrMeta+End");
+  await editor.pressSequentially("！");
+  await p.getByRole("button", { name: "保存する" }).click();
+  await expect(p).toHaveURL(`/posts/${mentionedId}`);
+  await expect(p.getByRole("link", { name: "@オーナー" })).toBeVisible();
+  await expect(p.getByText("さん！")).toBeVisible();
+  await ownerPage.goto("/notifications");
+  await expect(ownerPage.getByText("新人さん さんがあなたをメンションしました")).toBeVisible();
 });
 
 test("承認制のグループ：投稿はメンバーにだけ見え、承認されると見えるようになる", async () => {
