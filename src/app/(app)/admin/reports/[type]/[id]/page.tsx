@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PhotoGrid } from "@/components/PhotoGrid";
 import { notFound } from "next/navigation";
 import { STATUS_BADGE, STATUS_LABEL } from "@/components/labels";
 import { formatDateTime } from "@/components/time";
@@ -39,12 +40,7 @@ export default async function ReportCasePage(props: PageProps<"/admin/reports/[t
           </p>
           <div className="whitespace-pre-wrap break-words rounded-lg bg-canvas p-4 text-[15px]">{content?.body || "（本文なし）"}</div>
           {content?.mediaIds && content.mediaIds.length > 0 && (
-            <div className="grid grid-cols-2 gap-2">
-              {content.mediaIds.map((m) => (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img key={m} src={`/api/media/${m}`} alt="" className="w-full rounded-lg" />
-              ))}
-            </div>
+            <PhotoGrid photos={content.mediaIds.map((id) => ({ id }))} className="grid grid-cols-2 gap-2" thumbClassName="w-full rounded-lg" />
           )}
           <p className="text-xs text-muted">この閲覧は監査ログに記録されました。</p>
         </section>

@@ -62,6 +62,25 @@ test("オーナーが画像付きで投稿し、招待リンクを発行する",
   expect(served.headers()["content-type"]).toBe("image/webp");
   expect((await served.body()).includes(Buffer.from("SecretCam"))).toBe(false);
 
+  // 写真は別のタブに移らず、ページの上で拡大する。写真の外を押すと閉じて、元の一覧に戻る
+  const tabs = ownerPage.context().pages().length;
+  await post.getByRole("link", { name: "写真を拡大" }).click();
+  const viewer = ownerPage.getByRole("dialog", { name: "写真" });
+  await expect(viewer).toBeVisible();
+  await expect(viewer.locator("img")).toHaveAttribute("src", mediaUrl);
+  expect(ownerPage.context().pages()).toHaveLength(tabs);
+  await viewer.locator("img").click(); // 写真そのものを押しても閉じない
+  await expect(viewer).toBeVisible();
+  await ownerPage.mouse.click(8, 400);
+  await expect(viewer).toBeHidden();
+  await expect(ownerPage).toHaveURL("/");
+  await expect(post).toBeVisible();
+  // Esc でも閉じる
+  await post.getByRole("link", { name: "写真を拡大" }).click();
+  await expect(viewer).toBeVisible();
+  await ownerPage.keyboard.press("Escape");
+  await expect(viewer).toBeHidden();
+
   await ownerPage.goto("/invites");
   await ownerPage.getByRole("button", { name: "招待リンクを発行" }).click();
   inviteUrl = await ownerPage.getByTestId("invite-url").inputValue();

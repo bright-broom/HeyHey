@@ -3,6 +3,7 @@ import { deleteCommentAction, deletePostAction, reactAction } from "@/app/action
 import { REACTIONS, VISIBILITY_LABEL, type CommentDTO, type PostDTO } from "@/server/services/posts";
 import { Avatar } from "./Avatar";
 import { CommentForm } from "./CommentForm";
+import { PhotoGrid } from "./PhotoGrid";
 import { ReportForm } from "./ReportForm";
 import { RichText } from "./RichText";
 import { timeAgo } from "./time";
@@ -73,26 +74,16 @@ function Attachments({ media }: { media: PostDTO["media"] }) {
   );
 }
 
-/** 画像は角を落とさず、細い目地（2px）で並べる */
+/** 画像は角を落とさず、細い目地（2px）で並べる。押すとページの上で拡大する（別のタブには移らない） */
 function MediaGrid({ media }: { media: PostDTO["media"] }) {
   if (!media.length) return null;
   const cols = media.length === 1 ? "grid-cols-1" : "grid-cols-2";
   return (
-    <div className={`mt-5 grid ${cols} gap-0.5 bg-line`}>
-      {media.map((m) => (
-        <a key={m.id} href={`/api/media/${m.id}`} target="_blank" rel="noopener" className="block bg-concrete">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={`/api/media/${m.id}`}
-            alt=""
-            width={m.width}
-            height={m.height}
-            loading="lazy"
-            className={`w-full object-cover ${media.length === 1 ? "max-h-[560px]" : "aspect-square"}`}
-          />
-        </a>
-      ))}
-    </div>
+    <PhotoGrid
+      photos={media}
+      className={`mt-5 grid ${cols} gap-0.5 bg-line`}
+      thumbClassName={`w-full object-cover ${media.length === 1 ? "max-h-[560px]" : "aspect-square"}`}
+    />
   );
 }
 
