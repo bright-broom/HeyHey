@@ -23,7 +23,7 @@ beforeAll(async () => {
 describe("ログイン後の遷移先（オープンリダイレクト）", () => {
   it("サイト内のパスだけを通し、外部に飛ぶものは拒否する", () => {
     expect(safeLocalPath("/posts/abc?x=1")).toBe("/posts/abc?x=1");
-    for (const bad of ["//evil.example", "/\\evil.example", "/\t/evil.example", "/%09/evil.example".replace("%09", "\t"), "https://evil.example", "javascript:alert(1)", "/\n/evil.example", ""]) {
+    for (const bad of ["//evil.example", "/\\evil.example", "/\t/evil.example", decodeURIComponent("/%09/evil.example"), "https://evil.example", "javascript:alert(1)", "/\n/evil.example", ""]) {
       expect(safeLocalPath(bad)).toBeNull();
     }
   });
