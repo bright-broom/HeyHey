@@ -85,7 +85,8 @@ export function Composer({
       {previews.length > 0 && (
         <div className="px-4 pb-4 sm:px-6">
           <div className="grid grid-cols-4 gap-0.5">
-            {previews.map((u) => (
+            {/* 自分で作った blob: の URL だけを表示する（ほかの URL が紛れ込んでも img に渡さない） */}
+            {previews.filter((u) => u.startsWith("blob:")).map((u) => (
               // eslint-disable-next-line @next/next/no-img-element
               <img key={u} src={u} alt="" className="aspect-square w-full object-cover" />
             ))}
